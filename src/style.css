@@ -130,6 +130,12 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 .container.wysiwyg-v2 .editor { display: none; }
 .container.wysiwyg-v2-loading .editor { display: block; }
 .container.wysiwyg-v2 .preview { display: none !important; }
+/* 所见模式覆盖渲染容器：在 ProseMirror 之上渲染 Mermaid/KaTeX 预览 */
+#md-wysiwyg-root .overlay-host { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+#md-wysiwyg-root .overlay-host .ov-mermaid,
+#md-wysiwyg-root .overlay-host .ov-katex { pointer-events: none; }
+#md-wysiwyg-root .overlay-host .ov-mermaid > div,
+#md-wysiwyg-root .overlay-host .ov-katex > div { pointer-events: auto; }
 /* 保证所见 V2 的滚动容器占满并可滚动 */
 #md-wysiwyg-root .scrollView { height: 100%; overflow-y: auto; }
 /* 兜底：Milkdown 根容器（通常为 .milkdown）与其第一级子元素占满高度 */

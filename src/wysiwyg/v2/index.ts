@@ -4,9 +4,8 @@
 import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx, editorViewCtx, commandsCtx } from '@milkdown/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { readFile } from '@tauri-apps/plugin-fs'
-import { readFile } from '@tauri-apps/plugin-fs'
 // 用于外部（main.ts）在所见模式下插入 Markdown（文件拖放时复用普通模式逻辑）
-import { replaceAll } from '@milkdown/utils'
+import { replaceAll, getMarkdown } from '@milkdown/utils'
 import { commonmark } from '@milkdown/preset-commonmark'
 import { gfm } from '@milkdown/preset-gfm'
 import { automd } from '@milkdown/plugin-automd'
@@ -23,6 +22,8 @@ let _onChange: ((md: string) => void) | null = null
 let _suppressInitialUpdate = false
 let _lastMd = ''
 let _imgObserver: MutationObserver | null = null
+let _overlayTimer: number | null = null
+let _overlayHost: HTMLDivElement | null = null
 
 function toLocalAbsFromSrc(src: string): string | null {
   try {
@@ -202,6 +203,9 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
   } catch {}
   // 初次渲染后重写本地图片为 asset: url（仅影响 DOM，不改 Markdown）
   try { setTimeout(() => { try { rewriteLocalImagesToAsset() } catch {} }, 0) } catch {}
+  // 首次挂载后运行一次增强渲染（Mermaid / LaTeX 块）
+  try { setTimeout(() => { try { scheduleOverlayRender() } catch {} }, 60) } catch {}
+  try { window.addEventListener('resize', () => { try { scheduleOverlayRender() } catch {} }) } catch {}
   // 成功创建后清理占位文案（仅移除纯文本节点，不影响编辑器 DOM）
   try {
     if (_root && _root.firstChild && (_root.firstChild as any).nodeType === 3) {
@@ -215,6 +219,8 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
       pm.style.display = 'block'
       pm.style.minHeight = '100%'
       pm.style.width = '100%'
+      // 滚动时也刷新覆盖渲染（重定位预览块）
+      try { pm.addEventListener('scroll', () => { try { scheduleOverlayRender() } catch {} }) } catch {}
     }
     const host = _root?.firstElementChild as HTMLElement | null
     if (host) {
@@ -231,14 +237,16 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
       lm.docChanged((_ctx) => {
         if (_suppressInitialUpdate) return
         try { if (_writeBackTimer != null) { clearTimeout(_writeBackTimer as any); _writeBackTimer = null } } catch {}
-        _writeBackTimer = window.setTimeout(async () => {
-          try {
-            const md = await (editor as any).action(getMarkdown())
-            _lastMd = md
-            _onChange?.(md)
-          } catch {}
-        }, 80)
-      })
+      _writeBackTimer = window.setTimeout(async () => {
+        try {
+          const md = await (editor as any).action(getMarkdown())
+          _lastMd = md
+          _onChange?.(md)
+        } catch {}
+      }, 80)
+      // 文档变更后，稍后刷新自动预览层
+      scheduleOverlayRender()
+    })
     } catch {}
     lm.markdownUpdated((_ctx, markdown) => {
       if (_suppressInitialUpdate) return
@@ -264,6 +272,8 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
       _lastMd = md2
       try { _onChange?.(md2) } catch {}
       try { setTimeout(() => { try { rewriteLocalImagesToAsset() } catch {} }, 0) } catch {}
+      // Markdown 更新时，也刷新增强渲染
+      scheduleOverlayRender()
     })
   } catch {}
   _suppressInitialUpdate = false
@@ -276,6 +286,7 @@ export async function disableWysiwygV2() {  try {
     }
   } catch {}
   try { if (_imgObserver) { _imgObserver.disconnect(); _imgObserver = null } } catch {}
+  try { if (_overlayHost && _overlayHost.parentElement) { _overlayHost.parentElement.removeChild(_overlayHost); _overlayHost = null } } catch {}
   if (_editor) {
     try { await _editor.destroy() } catch {}
     _editor = null
@@ -299,6 +310,138 @@ export function isWysiwygV2Enabled(): boolean { return !!_editor }
 export async function wysiwygV2ReplaceAll(markdown: string) {
   if (!_editor) return
   try { await _editor.action(replaceAll(markdown)) } catch {}
+}
+
+// =============== 自动渲染覆盖层：Mermaid 代码块 + $$...$$ 数学块 ===============
+function scheduleOverlayRender() {
+  try { if (_overlayTimer != null) { clearTimeout(_overlayTimer); _overlayTimer = null } } catch {}
+  _overlayTimer = window.setTimeout(() => { try { renderOverlaysNow() } catch {} }, 120)
+}
+
+function getHost(): HTMLElement | null {
+  try {
+    const host0 = _root as HTMLElement | null
+    return (host0?.querySelector('.ProseMirror') as HTMLElement | null) || host0
+  } catch { return null }
+}
+
+function ensureOverlayHost(): HTMLDivElement | null {
+  try {
+    const root = _root
+    if (!root) return null
+    if (_overlayHost && _overlayHost.parentElement) return _overlayHost
+    const ov = document.createElement('div')
+    ov.className = 'overlay-host'
+    ov.style.position = 'absolute'
+    ov.style.inset = '0'
+    ov.style.zIndex = '5'
+    ov.style.pointerEvents = 'none'
+    root.appendChild(ov)
+    _overlayHost = ov
+    return ov
+  } catch { return null }
+}
+
+async function renderMermaidInto(el: HTMLDivElement, code: string) {
+  try {
+    const mod: any = await import('mermaid')
+    const mermaid = mod?.default || mod
+    try { mermaid.initialize?.({ startOnLoad: false, securityLevel: 'loose', theme: 'default' }) } catch {}
+    const id = 'mmd-' + Math.random().toString(36).slice(2)
+    const { svg } = await mermaid.render(id, code || '')
+    el.innerHTML = svg
+  } catch (e) {
+    el.innerHTML = `<div style="color:crimson;">Mermaid 渲染失败：${(e as any)?.message || e}</div>`
+  }
+}
+
+async function renderKatexInto(el: HTMLDivElement, src: string, display: boolean) {
+  try {
+    const mod: any = await import('katex')
+    const katex = mod?.default || mod
+    katex.render(src || '', el, { displayMode: !!display, throwOnError: false, output: 'html' })
+  } catch (e) {
+    el.innerHTML = `<div style=\"color:crimson;\">KaTeX 渲染失败：${(e as any)?.message || e}</div>`
+  }
+}
+
+function renderOverlaysNow() {
+  const host = getHost()
+  const ov = ensureOverlayHost()
+  if (!host || !ov) return
+  try { ov.innerHTML = '' } catch {}
+  // 清理上一次为预览预留的 margin 空间
+  try { Array.from(host.querySelectorAll('[data-ov-mb]')).forEach((el) => { try { (el as HTMLElement).style.marginBottom = ''; (el as HTMLElement).removeAttribute('data-ov-mb') } catch {} }) } catch {}
+  const hostRc = (_root as HTMLElement).getBoundingClientRect()
+  const addOverlay = (rect: DOMRect, cls: string, render: (el: HTMLDivElement)=>void) => {
+    const wrap = document.createElement('div')
+    wrap.className = cls
+    wrap.style.position = 'absolute'
+    wrap.style.left = Math.max(0, rect.left - hostRc.left) + 'px'
+    wrap.style.top = Math.max(0, rect.bottom - hostRc.top + 4) + 'px'
+    wrap.style.width = Math.max(10, rect.width) + 'px'
+    wrap.style.pointerEvents = 'none'
+    const inner = document.createElement('div')
+    inner.style.pointerEvents = 'auto'
+    inner.style.background = 'var(--bg)'
+    inner.style.borderRadius = '8px'
+    inner.style.padding = '6px'
+    inner.style.border = '1px solid var(--border-strong)'
+    wrap.appendChild(inner)
+    ov.appendChild(wrap)
+    render(inner)
+  }
+  // Mermaid blocks
+  Array.from(host.querySelectorAll('pre')).forEach((pre) => {
+    try {
+      const codeEl = (pre as HTMLElement).querySelector('code') as HTMLElement | null
+      const langFromClass = codeEl ? /\blanguage-([\w-]+)\b/.exec(codeEl.className || '')?.[1] : ''
+      const langFromAttr = ((pre as HTMLElement).getAttribute('data-language') || (pre as HTMLElement).getAttribute('data-lang') || '').toLowerCase()
+      const lang = (langFromAttr || langFromClass || '').toLowerCase()
+      if (lang !== 'mermaid') return
+      const code = (codeEl?.textContent || '').trim()
+      const rc = (pre as HTMLElement).getBoundingClientRect()
+      addOverlay(rc, 'ov-mermaid', (pane) => {
+        void (async () => {
+          await renderMermaidInto(pane, code)
+          // 渲染完成后根据实际高度为源码块留出空间，避免遮挡下面文本
+          try {
+            const update = () => {
+              const h = pane.offsetHeight
+              ;(pre as HTMLElement).style.paddingBottom = Math.max(8, h + 8) + 'px'
+              ;(pre as HTMLElement).setAttribute('data-ov-mb', '1')
+            }
+            // 下一帧测量，确保布局已更新
+            try { requestAnimationFrame(update) } catch { update() }
+          } catch {}
+        })()
+      })
+    } catch {}
+  })
+  // Block math $$...$$ overlays
+  Array.from(host.querySelectorAll('p,li,div')).forEach((el) => {
+    try {
+      if ((el as HTMLElement).closest('pre')) return
+      const text = el.textContent || ''
+      const m = text.match(/\$\$([\s\S]+?)\$\$/)
+      if (!m || !m[1]) return
+      const src = (m[1] || '').trim()
+      const rc = (el as HTMLElement).getBoundingClientRect()
+      addOverlay(rc, 'ov-katex', (pane) => {
+        void (async () => {
+          await renderKatexInto(pane, src, true)
+          try {
+            const update = () => {
+              const h = pane.offsetHeight
+              ;(el as HTMLElement).style.paddingBottom = Math.max(8, h + 8) + 'px'
+              ;(el as HTMLElement).setAttribute('data-ov-mb', '1')
+            }
+            try { requestAnimationFrame(update) } catch { update() }
+          } catch {}
+        })()
+      })
+    } catch {}
+  })
 }
 
 // =============== 所见模式：编辑命令桥接（加粗/斜体/链接） ===============

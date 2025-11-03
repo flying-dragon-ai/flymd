@@ -1305,6 +1305,7 @@ let _wheelHandlerRef: ((e: WheelEvent)=>void) | null = null
                 <div class="sc-act">\u53e6\u5b58\u4e3a</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></div>
                 <div class="sc-act">\u65b0\u5efa</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>N</kbd></div>
                 <div class="sc-act">\u7f16\u8f91/\u9884\u89c8</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>E</kbd></div>
+                <div class="sc-act">\u6240\u89c1\u6a21\u5f0f</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>W</kbd></div>
                 <div class="sc-act">\u9605\u8bfb</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>R</kbd></div>
                 <div class="sc-act">\u63d2\u5165\u94fe\u63a5</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>K</kbd></div>
                 <div class="sc-act">\u52a0\u7c97</div><div class="sc-keys"><kbd>Ctrl</kbd> + <kbd>B</kbd></div>

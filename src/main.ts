@@ -2103,37 +2103,8 @@ async function renderPreview() {
     }
   } catch (e) {
     console.error('Mermaid 渲染失败：', e)
-  // 代码块装饰：语言角标、行号与复制按钮
-  try {
-    const codes = Array.from(preview.querySelectorAll('pre > code.hljs')) as HTMLElement[]
-    for (const code of codes) {
-      const pre = code.parentElement as HTMLElement | null
-      if (!pre || pre.getAttribute('data-codebox') === '1') continue
-      // 跳过 mermaid（已在前面转换成 div.mermaid）
-      if (code.classList.contains('language-mermaid')) continue
-      const lang = ((Array.from(code.classList).find(c => c.startsWith('language-')) || '').slice(9) || 'text').toUpperCase()
-      // 包装行以生成行号
-      try {
-        const html = code.innerHTML
-        const parts = html.split('\n')
-        code.innerHTML = parts.map(p => `<span class="cb-ln">${p || '&nbsp;'}</span>`).join('\n')
-      } catch {}
-      const box = document.createElement('div')
-      box.className = 'codebox'
-      const badge = document.createElement('div')
-      badge.className = 'code-lang'
-      badge.textContent = lang
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'code-copy'
-      btn.textContent = '复制'
-      if (pre.parentElement) pre.parentElement.insertBefore(box, pre)
-      box.appendChild(pre)
-      box.appendChild(badge)
-      box.appendChild(btn)
-      pre.setAttribute('data-codebox', '1')
-    }
-  } catch {}
+  // 代码块装饰：委托到统一的 decorateCodeBlocks，避免重复实现导致行为不一致
+  try { decorateCodeBlocks(preview) } catch {}
 
   // 首次预览完成打点
   try { if (!(renderPreview as any)._firstDone) { (renderPreview as any)._firstDone = true; logInfo('打点:首次预览完成') } } catch {}

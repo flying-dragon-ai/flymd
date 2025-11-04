@@ -610,9 +610,35 @@ html, body { overflow: hidden; }
 .codebox .code-lang { position: absolute; top: 10px; left: 12px; padding: 3px 8px; border: 1px solid var(--code-border); border-radius: 6px; background: var(--bg); color: var(--muted); font-size: 11px; line-height: 1; font-weight: 500; }
 .codebox .code-copy { position: absolute; top: 10px; right: 12px; padding: 4px 10px; border: 1px solid var(--code-border); border-radius: 6px; background: rgba(127,127,127,0.08); color: var(--fg); font-size: 11px; cursor: pointer; font-weight: 500; transition: all 0.15s ease; }
 .codebox .code-copy:hover { background: rgba(127,127,127,0.16); border-color: var(--fg); }
-.codebox pre { margin: 0; counter-reset: ln; }
-.codebox .cb-ln { display: block; position: relative; padding-left: 3.2em; }
-.codebox .cb-ln::before { content: counter(ln); counter-increment: ln; position: absolute; left: 0; width: 2.8em; text-align: right; color: var(--code-muted); font-size: 12px; user-select: none; }
+.codebox pre { margin: 0; position: relative; /* 让行号层可绝对定位 */ }
+/* 行号列：绝对定位在 pre 内部左侧，随内容滚动 */
+.codebox .code-lnums {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 3.2em;               /* 预留固定列宽 */
+  padding-left: 0.4em;         /* 数字向内缩进，贴齐左侧 */
+  padding-top: 16px;           /* 与 pre 的 padding-top 保持一致，保证首行对齐 */
+  box-sizing: border-box;
+  color: var(--code-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums; /* 等宽数字，纵向对齐更整齐 */
+  text-align: left;
+  pointer-events: none;        /* 不挡操作 */
+  z-index: 1;                  /* 低于角标/复制按钮 */
+}
+.codebox .code-lnums .ln { display: block; line-height: 1.8; }
+/* 所见模式下行高更高时，同步行号行高 */
+.container.wysiwyg .codebox .code-lnums .ln { line-height: 1.6; }
+/* 为行号列让出内边距，避免覆盖代码文本 */
+.codebox pre { padding-left: calc(16px + 3.2em + 0.4em); }
+/* 提升角标/复制按钮层级，避免被行号列覆盖 */
+.codebox .code-lang, .codebox .code-copy { z-index: 2; }
+
+/* 阅读模式：移除代码块边框，仅保留背景，不要出现内部横向分隔线 */
+.container:not(.wysiwyg) .preview pre { border: none; }
+
+/* 移除阅读模式内所有“横线”式分割视觉（保留背景与内边距） */
+.container:not(.wysiwyg) .preview pre * { border: 0 !important; box-shadow: none !important; }
 
 /* === 侧栏文档图标色（按扩展名）=== */
 .library .lib-node.file-ext-md .lib-ico-file,
@@ -671,7 +697,7 @@ html, body { overflow: hidden; }
 
 /* === 行距优化（代码块）=== */
 /* 预览模式：使用舒适的行距以提高可读性 */
-.preview pre code { line-height: 1.2 !important; }
+.preview pre code { line-height: 1.8 !important; }
 /* 所见模式：保持一致的行距 */
 .container.wysiwyg .preview pre,
 .container.wysiwyg .preview pre code { line-height: 1.6 !important; }

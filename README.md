@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.1.4-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.1.6-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-NonCommercial-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -173,6 +173,10 @@ flyMD 支持通过扩展插件来增强功能。你可以：
 - 预览切换：≤ 16ms
 
 ## 🗺️ 路线图
+
+## 更新 v0.1.6(即将发布)
+- 增加待办事项（TODO）功能，阅读模式下可通过点击更改状态
+- MarkDown各类排版样式美化，字体更改/抗锯齿/流畅动画过度
 
 ## 更新 v0.1.5
 - 隐藏所见模式中mermaid渲染错误提示，避免影响输入体验

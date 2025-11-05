@@ -1264,7 +1264,8 @@ let _wheelHandlerRef: ((e: WheelEvent)=>void) | null = null
     const elPath = library.querySelector('#lib-path') as HTMLDivElement | null
     const elChoose = library.querySelector('#lib-choose') as HTMLButtonElement | null
     const elRefresh = library.querySelector('#lib-refresh') as HTMLButtonElement | null
-    if (elPath) elPath.textContent = '\u672a\u9009\u62e9\u5e93\u76ee\u5f55'
+    // 去除“未选择库目录”默认提示，保持为空，避免长期提示误导
+    if (elPath) elPath.textContent = ''
     if (elChoose) elChoose.textContent = '\u9009\u62e9\u5e93'
     if (elRefresh) elRefresh.textContent = '\u5237\u65b0'
   } catch {}

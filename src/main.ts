@@ -1598,7 +1598,7 @@ function refreshTitle() {
   filenameLabel.textContent = label
   try { filenameLabel.title = full || name } catch {}
   document.title = label
-  try { void getCurrentWindow().setTitle(label) } catch {}
+  try { void getCurrentWindow().setTitle(label).catch(() => {}) } catch {}
 }
 
 // 更新状态栏（行列）
@@ -2883,11 +2883,33 @@ async function setLibrarySort(mode: LibSortMode) {
 let _outlineScrollBound = false
 let _outlineActiveId = ''
 let _outlineRaf = 0
+function getOutlineContext(): { mode: 'wysiwyg'|'preview'|'source'; scrollEl: HTMLElement | null; bodyEl: HTMLElement | null; heads: HTMLElement[] } {
+  try {
+    if (wysiwyg) {
+      const rootEl = document.getElementById('md-wysiwyg-root') as HTMLElement | null
+      const scrollEl = (document.querySelector('#md-wysiwyg-root .scrollView') as HTMLElement | null) || rootEl
+      const bodyEl = document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement | null
+      const heads = bodyEl ? Array.from(bodyEl.querySelectorAll('h1,h2,h3,h4,h5,h6')) as HTMLElement[] : []
+      if (scrollEl && bodyEl) return { mode: 'wysiwyg', scrollEl, bodyEl, heads }
+    }
+  } catch {}
+  try {
+    const scrollEl = document.querySelector('.preview') as HTMLElement | null
+    const bodyEl = document.querySelector('.preview .preview-body') as HTMLElement | null
+    const heads = bodyEl ? Array.from(bodyEl.querySelectorAll('h1,h2,h3,h4,h5,h6')) as HTMLElement[] : []
+    if (scrollEl && bodyEl) return { mode: 'preview', scrollEl, bodyEl, heads }
+  } catch {}
+  return { mode: 'source', scrollEl: null, bodyEl: null, heads: [] }
+}
+let _outlineScrollBoundPreview = false
+let _outlineScrollBoundWysiwyg = false
 function bindOutlineScrollSync() {
-  if (_outlineScrollBound) return
-  const pv = document.querySelector('.preview') as HTMLElement | null
-  if (pv) { pv.addEventListener('scroll', onOutlineScroll, { passive: true }) }
-  _outlineScrollBound = true
+  const prev = document.querySelector('.preview') as HTMLElement | null
+  if (prev && !_outlineScrollBoundPreview) { prev.addEventListener('scroll', onOutlineScroll, { passive: true }); _outlineScrollBoundPreview = true }
+  const wysi = document.getElementById('md-wysiwyg-root') as HTMLElement | null
+  const wysiScroll = (document.querySelector('#md-wysiwyg-root .scrollView') as HTMLElement | null) || wysi
+  if (wysiScroll && !_outlineScrollBoundWysiwyg) { wysiScroll.addEventListener('scroll', onOutlineScroll, { passive: true }); _outlineScrollBoundWysiwyg = true }
+  _outlineScrollBound = _outlineScrollBoundPreview || _outlineScrollBoundWysiwyg
 }
 function onOutlineScroll() {
   if (_outlineRaf) cancelAnimationFrame(_outlineRaf)
@@ -2895,8 +2917,7 @@ function onOutlineScroll() {
 }
 function updateOutlineActive() {
   try {
-    const pv = document.querySelector('.preview') as HTMLElement | null
-    const body = document.querySelector('.preview .preview-body') as HTMLElement | null
+    const { scrollEl: pv, bodyEl: body } = getOutlineContext()
     const outline = document.getElementById('lib-outline') as HTMLDivElement | null
     if (!pv || !body || !outline || outline.classList.contains('hidden')) return
     const heads = Array.from(body.querySelectorAll('h1,h2,h3,h4,h5,h6')) as HTMLElement[]
@@ -2918,9 +2939,9 @@ function renderOutlinePanel() {
   try {
     const outline = document.getElementById('lib-outline') as HTMLDivElement | null
     if (!outline) return
-    // 优先从预览 DOM 提取标题
-    const pv = document.querySelector('.preview .preview-body') as HTMLElement | null
-    const heads = pv ? Array.from(pv.querySelectorAll('h1,h2,h3,h4,h5,h6')) as HTMLElement[] : []
+    // 优先从当前上下文（WYSIWYG/预览）提取标题
+    const ctx = getOutlineContext()
+    const heads = ctx.heads
     const items: { level: number; id: string; text: string }[] = []
     const slug = (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9\u4e00-\u9fa5\s-]/gi,'').replace(/\s+/g,'-').slice(0,64) || ('toc-' + Math.random().toString(36).slice(2))
     if (heads.length > 0) {
@@ -3009,8 +3030,31 @@ function renderOutlinePanel() {
     })
 
     applyCollapse()
-    // 初始高亮与绑定滚动同步
-    setTimeout(() => { try { updateOutlineActive(); bindOutlineScrollSync() } catch {} }, 0)
+    // 初始高亮与绑定滚动同步 + WYSIWYG 观察
+    setTimeout(() => { try { updateOutlineActive(); bindOutlineScrollSync(); ensureOutlineObserverBound() } catch {} }, 0)
+  } catch {}
+}
+
+// 监听 WYSIWYG 内容变更以自动刷新大纲（仅在“所见模式 + 大纲页签可见”时节流刷新）
+let _outlineObserverBound = false
+let _outlineObserver: MutationObserver | null = null
+let _outlineUpdateTimer = 0
+function ensureOutlineObserverBound() {
+  if (_outlineObserverBound) return
+  try {
+    const bodyEl = document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement | null
+    if (!bodyEl) return
+    _outlineObserver = new MutationObserver(() => {
+      if (_outlineUpdateTimer) { clearTimeout(_outlineUpdateTimer); _outlineUpdateTimer = 0 }
+      _outlineUpdateTimer = window.setTimeout(() => {
+        try {
+          const outline = document.getElementById('lib-outline') as HTMLDivElement | null
+          if (outline && !outline.classList.contains('hidden')) renderOutlinePanel()
+        } catch {}
+      }, 200)
+    })
+    _outlineObserver.observe(bodyEl, { childList: true, subtree: true, characterData: true })
+    _outlineObserverBound = true
   } catch {}
 }
 

@@ -133,11 +133,8 @@
         // 波浪线（~ / ～）：Markdown 仅有成对的 ~~ 删除线
         // 规则：单个 ~/～ 不触发补全；输入连续两个 ~~ 或 ～～（短时间内）触发补全为 "~~~~" 或 "～～～～" 并将光标置于中间
         {
-          const w: any = window as any
           const isAsciiPair = (data === '~~')
           const isFullPair = (data === '～～')
-          const isAsciiOne = (data === '~')
-          const isFullOne = (data === '～')
           if (isAsciiPair || isFullPair) {
             ev.preventDefault()
             const token = isFullPair ? '～～' : '~~'
@@ -151,31 +148,6 @@
             if (e > s) { ta.selectionStart = s + tlen; ta.selectionEnd = s + tlen + mid.length }
             else { ta.selectionStart = ta.selectionEnd = s + tlen }
             rememberPrev(); return
-          }
-          if (isAsciiOne || isFullOne) {
-            // 第二个 ~/~～：替换上一个相同波浪为成对补全
-            const ch = isFullOne ? '～' : '~'
-            const now = Date.now()
-            const prevCh = (s > 0) ? val.slice(s - 1, s) : ''
-            const lastPos = (w._tildeLastPos ?? -9999) as number
-            const lastAt = (w._tildeLastTime ?? 0) as number
-            const within = (now - lastAt) <= 360
-            if (s === e && s > 0 && prevCh === ch && within && lastPos === s - 1) {
-              ev.preventDefault()
-              const token = ch + ch // "~~" or "～～"
-              const ins = token + token // "~~~~" or "～～～～"
-              ta.selectionStart = s - 1; ta.selectionEnd = s
-              if (!insertUndoable(ta, ins)) {
-                ta.value = val.slice(0, s - 1) + ins + val.slice(s)
-              }
-              const tlen = token.length
-              ta.selectionStart = ta.selectionEnd = (s - 1 + tlen)
-              rememberPrev(); w._tildeLastPos = -1; w._tildeLastTime = 0; return
-            }
-            // 记录第一次 ~ 的位置与时间，放行默认插入
-            w._tildeLastPos = s
-            w._tildeLastTime = now
-            return
           }
         }
         // 三连反引号：插入围栏（可撤销）
@@ -235,6 +207,19 @@
         const inserted = cur.slice(a, cur.length - b)
         const removed = prev.slice(a, prev.length - b)
         const hadSel = (pe > ps) || (removed.length > 0)
+        // 单个 ~ / ～：若与左侧同类波浪相邻，则展开为成对补全
+        if (inserted === '~' || inserted === '～') {
+          const ch = inserted
+          const token = ch + ch // "~~" or "～～"
+          if (a > 0 && prev.slice(a - 1, a) === ch) {
+            const left = prev.slice(0, a - 1)
+            const right = prev.slice(a)
+            ta.value = left + token + token + right
+            const tlen = token.length
+            ta.selectionStart = ta.selectionEnd = (a - 1 + tlen)
+            rememberPrev(); return
+          }
+        }
         // 组合输入兜底：处理 ~~ / ～～
         if (inserted === '~~' || inserted === '～～') {
           const token = inserted

@@ -702,6 +702,21 @@ export async function wysiwygV2ApplyLink(href: string, title?: string) {
   })
 }
 
+// 获取当前选中的文本
+export function wysiwygV2GetSelectedText(): string {
+  if (!_editor) return ''
+  try {
+    const view = (_editor as any).ctx?.get?.(editorViewCtx)
+    if (!view) return ''
+    const { state } = view
+    const { from, to } = state.selection
+    const selectedText = state.doc.textBetween(from, to, ' ')
+    return selectedText || ''
+  } catch {
+    return ''
+  }
+}
+
 
 
 

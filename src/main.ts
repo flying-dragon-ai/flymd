@@ -20,7 +20,7 @@ import { t, fmtStatus, getLocalePref, setLocalePref, getLocale } from './i18n'
 // markdown-it 和 DOMPurify 改为按需动态 import，类型仅在编译期引用
 import type MarkdownIt from 'markdown-it'
 // WYSIWYG: 锚点插件与锚点同步（用于替换纯比例同步）
-import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink } from './wysiwyg/v2/index'
+import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2GetSelectedText } from './wysiwyg/v2/index'
 
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
@@ -2674,7 +2674,8 @@ async function formatItalic() {
 }
 async function insertLink() {
   if (wysiwygV2Active) {
-    const preset = '链接文本'
+    const selectedText = wysiwygV2GetSelectedText()
+    const preset = selectedText || '链接文本'
     const result = await openLinkDialog(preset, 'https://')
     if (!result || !result.url) return
     await wysiwygV2ApplyLink(result.url)

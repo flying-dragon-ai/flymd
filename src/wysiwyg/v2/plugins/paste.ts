@@ -42,6 +42,7 @@ function toFileUri(p: string): string {
 }
 
 export const uploader: Uploader = async (files, schema) => {
+  console.log('[Paste] uploader 被调用, files.length:', files.length)
   const images: File[] = []
   for (let i = 0; i < files.length; i++) {
     const f = files.item(i)
@@ -49,54 +50,89 @@ export const uploader: Uploader = async (files, schema) => {
     if (!f.type.includes('image')) continue
     images.push(f)
   }
+  console.log('[Paste] 筛选出的图片数量:', images.length)
   const nodes: ProseNode[] = []
   const alwaysLocal = await getAlwaysLocal()
+  console.log('[Paste] alwaysLocal:', alwaysLocal)
+
   for (const img of images) {
-    let done = false
-    // 1) 若配置启用直连图床且未强制本地，优先外链
-    try {
-      if (!alwaysLocal) {
-        const cfgGetter = (typeof window !== 'undefined') ? (window as any).flymdGetUploaderConfig : null
-        const upCfg: UploaderConfig | null = typeof cfgGetter === 'function' ? await cfgGetter() : null
-        if (upCfg && upCfg.enabled) {
-          const res = await uploadImageToS3R2(img, img.name || 'image', img.type || 'application/octet-stream', upCfg)
-          const url = res?.publicUrl || ''
-          if (url) {
-            const n = schema.nodes.image.createAndFill({ src: url, alt: img.name }) as ProseNode
-            if (n) { nodes.push(n); done = true }
-          }
-        }
-      }
-    } catch {}
-    // 2) 否则保存到本地 images/ 或默认粘贴目录
-    if (!done) {
+    console.log('[Paste] 处理图片:', img.name, 'size:', img.size, 'type:', img.type)
+    let localPath: string | null = null
+    let cloudUrl: string | null = null
+
+    // 1) 检查图床配置
+    const cfgGetter = (typeof window !== 'undefined') ? (window as any).flymdGetUploaderConfig : null
+    const upCfg: UploaderConfig | null = typeof cfgGetter === 'function' ? await cfgGetter() : null
+    const uploaderEnabled = upCfg && upCfg.enabled
+    console.log('[Paste] uploaderEnabled:', uploaderEnabled, 'upCfg:', upCfg)
+
+    // 2) 先尝试保存本地（如果未启用图床，或启用了"总是保存到本地"）
+    if (!uploaderEnabled || alwaysLocal) {
+      console.log('[Paste] 尝试保存本地...')
       try {
-        const cur = await getCurrentPath()
-        let baseDir: string | null = null
-        if (cur && typeof cur === 'string') {
-          const dir = cur.replace(/[\\/][^\\/]*$/, '')
-          baseDir = pathJoin(dir, 'images')
-        } else {
-          baseDir = await getDefaultPasteDir()
-        }
         const saver = (window as any).flymdSaveImageToLocalAndGetPath
-        const dstPath: string | null = typeof saver === 'function' ? await saver(img, img.name || 'image') : null
-        if (dstPath) {
-          const url = toFileUri(dstPath)
-          const n = schema.nodes.image.createAndFill({ src: url, alt: img.name }) as ProseNode
-          if (n) { nodes.push(n); done = true }
+        console.log('[Paste] saver 函数存在:', typeof saver === 'function')
+        if (typeof saver === 'function') {
+          localPath = await saver(img, img.name || 'image')
+          console.log('[Paste] 本地保存结果:', localPath)
         }
-      } catch {}
+      } catch (e) {
+        console.error('[Paste] 本地保存失败:', e)
+      }
+    } else {
+      console.log('[Paste] 跳过本地保存（图床已启用且未勾选总是保存到本地）')
     }
-    // 3) 兜底：base64
-    if (!done) {
+
+    // 3) 再尝试上传图床（如果启用了图床）
+    if (uploaderEnabled) {
+      console.log('[Paste] 尝试上传图床...')
       try {
-        const dataUrl = await toDataUrl(img)
-        const n = schema.nodes.image.createAndFill({ src: dataUrl, alt: img.name }) as ProseNode
-        if (n) nodes.push(n)
-      } catch {}
+        const res = await uploadImageToS3R2(img, img.name || 'image', img.type || 'application/octet-stream', upCfg)
+        cloudUrl = res?.publicUrl || ''
+        console.log('[Paste] 图床上传结果:', cloudUrl)
+      } catch (e) {
+        console.error('[Paste] 图床上传失败:', e)
+      }
+    } else {
+      console.log('[Paste] 跳过图床上传（图床未启用）')
+    }
+
+    // 4) 根据结果决定使用哪个URL
+    let finalUrl: string | null = null
+    if (cloudUrl) {
+      // 如果图床上传成功，使用图床URL（即使本地也保存了）
+      finalUrl = cloudUrl
+      console.log('[Paste] 使用图床URL')
+    } else if (localPath) {
+      // 如果图床失败或未启用，但本地保存成功，使用本地路径
+      finalUrl = toFileUri(localPath)
+      console.log('[Paste] 使用本地路径, 转换后的 fileUri:', finalUrl)
+    }
+
+    // 5) 创建图片节点
+    if (finalUrl) {
+      const n = schema.nodes.image.createAndFill({ src: finalUrl, alt: img.name }) as ProseNode
+      if (n) {
+        console.log('[Paste] 创建图片节点成功, src:', finalUrl)
+        nodes.push(n)
+        continue
+      }
+    }
+
+    // 6) 兜底：base64（仅在所有方式都失败时使用）
+    console.warn('[Paste] 所有方式都失败，使用 base64 兜底')
+    try {
+      const dataUrl = await toDataUrl(img)
+      const n = schema.nodes.image.createAndFill({ src: dataUrl, alt: img.name }) as ProseNode
+      if (n) {
+        console.log('[Paste] base64 节点创建成功')
+        nodes.push(n)
+      }
+    } catch (e) {
+      console.error('[Paste] base64 兜底失败:', e)
     }
   }
+  console.log('[Paste] 返回节点数量:', nodes.length)
   return nodes
 }
 

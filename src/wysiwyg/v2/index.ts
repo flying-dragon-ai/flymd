@@ -199,6 +199,7 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
     })
     .use(commonmark)
     .use(gfm)
+    .use(upload)
     .use(remarkMathPlugin).use(katexOptionsCtx).use(mathInlineSchema).use(mathBlockSchema).use(mathInlineInputRule)
     .use(mathInlineViewPlugin)
     .use(mathBlockViewPlugin)

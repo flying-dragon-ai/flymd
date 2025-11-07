@@ -963,11 +963,23 @@ async function renderPreviewLight() {
 
 // 供所见 V2 调用：将粘贴/拖拽的图片保存到本地，并返回可写入 Markdown 的路径（自动生成不重复文件名）
 async function saveImageToLocalAndGetPath(file: File, fname: string): Promise<string | null> {
+  console.log('[saveImageToLocal] 被调用, fname:', fname, 'file.size:', file.size)
   try {
     const alwaysLocal = await getAlwaysSaveLocalImages()
-    // 若未启用直连图床，或启用了“总是保存到本地”，尝试本地保存
     const upCfg = await getUploaderConfig()
-    if (!(alwaysLocal || !upCfg)) return null
+    console.log('[saveImageToLocal] alwaysLocal:', alwaysLocal, 'upCfg:', upCfg)
+
+    // 判断是否需要保存到本地：
+    // 1. 未启用图床（upCfg 不存在或未启用）
+    // 2. 启用了图床但勾选了"总是保存到本地"
+    const uploaderEnabled = upCfg && upCfg.enabled
+    const shouldSaveLocal = !uploaderEnabled || alwaysLocal
+    console.log('[saveImageToLocal] uploaderEnabled:', uploaderEnabled, 'shouldSaveLocal:', shouldSaveLocal)
+
+    if (!shouldSaveLocal) {
+      console.log('[saveImageToLocal] 不需要保存到本地，返回 null')
+      return null
+    }
 
     // 生成不重复文件名：pasted-YYYYMMDD-HHmmss-rand.ext
     const guessExt = (): string => {
@@ -1017,17 +1029,27 @@ async function saveImageToLocalAndGetPath(file: File, fname: string): Promise<st
       const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
       const sep = base.includes('\\') ? '\\' : '/'
       const imgDir = base + sep + 'images'
-      return await writeTo(imgDir)
+      console.log('[saveImageToLocal] 使用文档同目录 images 文件夹:', imgDir)
+      const result = await writeTo(imgDir)
+      console.log('[saveImageToLocal] 保存成功:', result)
+      return result
     }
     if (isTauriRuntime() && !currentFilePath) {
       const baseDir = await getDefaultPasteDir()
+      console.log('[saveImageToLocal] 使用默认粘贴目录:', baseDir)
       if (baseDir) {
         const base2 = baseDir.replace(/[\\/]+$/, '')
-        return await writeTo(base2)
+        const result = await writeTo(base2)
+        console.log('[saveImageToLocal] 保存成功:', result)
+        return result
       }
     }
+    console.log('[saveImageToLocal] 没有合适的保存路径，返回 null')
     return null
-  } catch { return null }
+  } catch (e) {
+    console.error('[saveImageToLocal] 异常:', e)
+    return null
+  }
 }
 
 async function setWysiwygEnabled(enable: boolean) {
@@ -6116,123 +6138,115 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
   insertAtCursor(`![${fname || 'image'}](uploading://${id})`)
   void (async () => {
     try {
+      console.log('[Upload] 开始处理图片:', fname)
       const alwaysLocal = await getAlwaysSaveLocalImages()
-      if (alwaysLocal) {
-        // 优先保存到当前文档同目录 images/
-        try {
-          if (isTauriRuntime() && currentFilePath) {
+      const upCfg = await getUploaderConfig()
+      const uploaderEnabled = upCfg && upCfg.enabled
+      console.log('[Upload] alwaysLocal:', alwaysLocal, 'uploaderEnabled:', uploaderEnabled)
+
+      let localPath: string | null = null
+      let cloudUrl: string | null = null
+
+      // ===== 步骤 1: 本地保存（如果需要）=====
+      if (!uploaderEnabled || alwaysLocal) {
+        console.log('[Upload] 尝试本地保存...')
+        // 1a. 尝试保存到当前文档同目录 images/
+        if (isTauriRuntime() && currentFilePath) {
+          try {
             const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
             const sep = base.includes('\\') ? '\\' : '/'
             const imgDir = base + sep + 'images'
-            try { await ensureDir(imgDir) } catch {}
+            await ensureDir(imgDir)
             const dst = imgDir + sep + fname
-            try {
-              const buf = new Uint8Array(await file.arrayBuffer())
-              await writeFile(dst as any, buf as any)
-              const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
-              const mdUrl = needAngle ? `<${dst}>` : dst
-              replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
-              return
-            } catch {}
+            const buf = new Uint8Array(await file.arrayBuffer())
+            await writeFile(dst as any, buf as any)
+            localPath = dst
+            console.log('[Upload] 本地保存成功:', localPath)
+          } catch (e) {
+            console.error('[Upload] 本地保存失败（文档同目录）:', e)
           }
-        } catch {}
-        // 未保存的文档：尝试默认粘贴目录
-        try {
-          if (isTauriRuntime() && !currentFilePath) {
+        }
+
+        // 1b. 未保存的文档：尝试默认粘贴目录
+        if (!localPath && isTauriRuntime() && !currentFilePath) {
+          try {
             const dir = await getDefaultPasteDir()
             if (dir) {
               const baseDir = dir.replace(/[\\/]+$/, '')
               const sep = baseDir.includes('\\') ? '\\' : '/'
               const dst = baseDir + sep + fname
-              try {
-                const buf = new Uint8Array(await file.arrayBuffer())
-                try { await ensureDir(baseDir) } catch {}
-                await writeFile(dst as any, buf as any)
-                const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
-                const mdUrl = needAngle ? `<${dst}>` : dst
-                replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
-                return
-              } catch {}
+              const buf = new Uint8Array(await file.arrayBuffer())
+              await ensureDir(baseDir)
+              await writeFile(dst as any, buf as any)
+              localPath = dst
+              console.log('[Upload] 本地保存成功（默认目录）:', localPath)
             }
+          } catch (e) {
+            console.error('[Upload] 本地保存失败（默认目录）:', e)
           }
-        } catch {}
-        // 兜底：data URL
-        try {
-          const dataUrl = await fileToDataUrl(file)
-          replaceUploadingPlaceholder(id, `![${fname}](${dataUrl})`)
-          return
-        } catch {}
+        }
+
+        // 1c. 兜底：保存到用户图片目录
+        if (!localPath && isTauriRuntime() && !currentFilePath) {
+          try {
+            const pic = await getUserPicturesDir()
+            if (pic) {
+              const baseDir = pic.replace(/[\\/]+$/, '')
+              const sep = baseDir.includes('\\') ? '\\' : '/'
+              const dst = baseDir + sep + fname
+              const buf = new Uint8Array(await file.arrayBuffer())
+              await ensureDir(baseDir)
+              await writeFile(dst as any, buf as any)
+              localPath = dst
+              console.log('[Upload] 本地保存成功（图片目录）:', localPath)
+            }
+          } catch (e) {
+            console.error('[Upload] 本地保存失败（图片目录）:', e)
+          }
+        }
       }
-    } catch {}
-    try {
-      const upCfg = await getUploaderConfig()
-      if (upCfg) {
-        const res = await uploadImageToS3R2(file, fname, file.type || 'application/octet-stream', upCfg)
-        replaceUploadingPlaceholder(id, `![${fname}](${res.publicUrl})`)
+
+      // ===== 步骤 2: 图床上传（如果启用）=====
+      if (uploaderEnabled) {
+        console.log('[Upload] 尝试图床上传...')
+        try {
+          const res = await uploadImageToS3R2(file, fname, file.type || 'application/octet-stream', upCfg)
+          cloudUrl = res.publicUrl
+          console.log('[Upload] 图床上传成功:', cloudUrl)
+        } catch (e) {
+          console.error('[Upload] 图床上传失败:', e)
+        }
+      }
+
+      // ===== 步骤 3: 决定最终 URL =====
+      let finalUrl: string | null = null
+      if (cloudUrl) {
+        // 图床上传成功，使用图床 URL
+        finalUrl = cloudUrl
+        console.log('[Upload] 使用图床 URL')
+      } else if (localPath) {
+        // 图床失败或未启用，使用本地路径
+        const needAngle = /[\s()]/.test(localPath) || /^[a-zA-Z]:/.test(localPath) || /\\/.test(localPath)
+        finalUrl = needAngle ? `<${localPath}>` : localPath
+        console.log('[Upload] 使用本地路径')
+      }
+
+      if (finalUrl) {
+        replaceUploadingPlaceholder(id, `![${fname}](${finalUrl})`)
         return
       }
-    } catch {}
-    // 新增：在未配置图床时，优先尝试将粘贴图片落盘到与当前文档同级的 images/ 目录，并插入相对路径
-    try {
-      if (isTauriRuntime() && currentFilePath) {
-        const base = currentFilePath.replace(/[\\/][^\\/]*$/, '')
-        const sep = base.includes('\\') ? '\\' : '/'
-        const imgDir = base + sep + 'images'
-        try { await ensureDir(imgDir) } catch {}
-        const dst = imgDir + sep + fname
-        try {
-          const buf = new Uint8Array(await file.arrayBuffer())
-          await writeFile(dst as any, buf as any)
-          // 与拖拽一致：优先使用本地绝对路径，必要时用尖括号包裹
-          const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
-          const mdUrl = needAngle ? `<${dst}>` : dst
-          replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
-          return
-        } catch {}
-      }
-    } catch {}
-    // 新增：未保存的新文档场景，若配置了默认粘贴目录，则将图片落盘到该目录并插入本地路径
-    try {
-      if (isTauriRuntime() && !currentFilePath) {
-        const dir = await getDefaultPasteDir()
-        if (dir) {
-          const baseDir = dir.replace(/[\\/]+$/, '')
-          const sep = baseDir.includes('\\') ? '\\' : '/'
-          const dst = baseDir + sep + fname
-          try {
-            const buf = new Uint8Array(await file.arrayBuffer())
-            try { await ensureDir(baseDir) } catch {}
-            await writeFile(dst as any, buf as any)
-            const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
-            const mdUrl = needAngle ? `<${dst}>` : dst
-            replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
-            return
-          } catch {}
-        }
-        // 未设置默认粘贴目录，则回退保存到用户图片目录（Windows/Linux）
-        try {
-          const pic = await getUserPicturesDir()
-          if (pic) {
-            const baseDir = pic.replace(/[\\/]+$/, '')
-            const sep = baseDir.includes('\\') ? '\\' : '/'
-            const dst = baseDir + sep + fname
-            try {
-              const buf = new Uint8Array(await file.arrayBuffer())
-              try { await ensureDir(baseDir) } catch {}
-              await writeFile(dst as any, buf as any)
-              const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
-              const mdUrl = needAngle ? `<${dst}>` : dst
-              replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
-              return
-            } catch {}
-          }
-        } catch {}
-      }
-    } catch {}
-    try {
+
+      // ===== 步骤 4: 兜底 base64 =====
+      console.warn('[Upload] 所有方式失败，使用 base64 兜底')
       const dataUrl = await fileToDataUrl(file)
       replaceUploadingPlaceholder(id, `![${fname}](${dataUrl})`)
-    } catch {}
+    } catch (e) {
+      console.error('[Upload] 异常:', e)
+      try {
+        const dataUrl = await fileToDataUrl(file)
+        replaceUploadingPlaceholder(id, `![${fname}](${dataUrl})`)
+      } catch {}
+    }
   })()
   return Promise.resolve()
 }

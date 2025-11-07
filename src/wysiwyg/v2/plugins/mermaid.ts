@@ -128,9 +128,14 @@ class MermaidNodeView implements NodeView {
     // 双击切换到源代码编辑
     this.chartContainer.addEventListener('dblclick', (e) => {
       e.stopPropagation()
+      e.preventDefault()
       console.log('[Mermaid Plugin] 双击图表，切换到源代码')
       // 显示源代码，隐藏图表
       this.preWrapper.style.display = 'block'
+      this.preWrapper.style.border = '1px solid #ccc'
+      this.preWrapper.style.padding = '8px'
+      this.preWrapper.style.borderRadius = '4px'
+      this.preWrapper.style.background = '#fff'
       this.chartContainer.style.display = 'none'
       // 聚焦到代码编辑区
       requestAnimationFrame(() => {
@@ -142,23 +147,34 @@ class MermaidNodeView implements NodeView {
             range.collapse(false)
             sel.removeAllRanges()
             sel.addRange(range)
+            // 强制聚焦
+            ;(this.contentDOM as HTMLElement).focus()
           }
         } catch {}
       })
     })
 
-    // 源代码失焦时，隐藏并重新渲染图表
-    this.preWrapper.addEventListener('blur', (e) => {
-      // 检查焦点是否移到了外部元素
-      const relatedTarget = (e as FocusEvent).relatedTarget as HTMLElement | null
-      if (relatedTarget && this.preWrapper.contains(relatedTarget)) {
-        return // 焦点还在 preWrapper 内部，不处理
-      }
-      console.log('[Mermaid Plugin] 源代码失焦')
+    // 按 Escape 键退出编辑模式
+    const exitEditMode = () => {
+      console.log('[Mermaid Plugin] 退出编辑模式')
       this.preWrapper.style.display = 'none'
       this.chartContainer.style.display = 'block'
-      this.renderChart()
-    }, true)
+      // 强制重新渲染
+      requestAnimationFrame(() => {
+        this.renderChart()
+      })
+    }
+
+    this.preWrapper.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        exitEditMode()
+      }
+    })
+
+    // 点击外部区域时退出编辑模式
+    document.addEventListener('click', this.handleClickOutside)
 
     this.dom.appendChild(this.chartContainer)
 
@@ -204,6 +220,23 @@ class MermaidNodeView implements NodeView {
 
   destroy() {
     console.log('[Mermaid Plugin] destroy 被调用')
+    // 清理事件监听器
+    try {
+      document.removeEventListener('click', this.handleClickOutside)
+    } catch {}
+  }
+
+  private handleClickOutside = (e: Event) => {
+    if (this.preWrapper.style.display !== 'none') {
+      const target = e.target as HTMLElement
+      if (!this.dom.contains(target)) {
+        this.preWrapper.style.display = 'none'
+        this.chartContainer.style.display = 'block'
+        requestAnimationFrame(() => {
+          this.renderChart()
+        })
+      }
+    }
   }
 
   ignoreMutation() {

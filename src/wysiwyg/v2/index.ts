@@ -14,6 +14,7 @@ import { listener, listenerCtx } from '@milkdown/plugin-listener'
 import { upload, uploadConfig } from '@milkdown/plugin-upload'
 import { uploader } from './plugins/paste'
 import { mermaidPlugin } from './plugins/mermaid'
+import { mathInlineViewPlugin, mathBlockViewPlugin } from './plugins/math'
 import { remarkMathPlugin, katexOptionsCtx, mathInlineSchema, mathBlockSchema, mathInlineInputRule } from '@milkdown/plugin-math'
 // 注：保留 automd 插件以提供编辑功能，通过 CSS 隐藏其 UI 组件
 // 引入富文本所见视图的必要样式（避免工具条/布局错乱导致不可编辑/不可滚动）
@@ -199,6 +200,8 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
     .use(commonmark)
     .use(gfm)
     .use(remarkMathPlugin).use(katexOptionsCtx).use(mathInlineSchema).use(mathBlockSchema).use(mathInlineInputRule)
+    .use(mathInlineViewPlugin)
+    .use(mathBlockViewPlugin)
     .use(mermaidPlugin)
     .use(automd)
     .use(listener)

@@ -8,7 +8,7 @@
 //   使用 .container 作用域内的 CSS 变量覆盖（--bg / --wysiwyg-bg / --preview-bg），避免影响标题栏等外围 UI。
 
 export type TypographyId = 'default' | 'serif' | 'modern' | 'reading' | 'academic'
-export type MdStyleId = 'standard' | 'github' | 'notion' | 'journal'
+export type MdStyleId = 'standard' | 'github' | 'notion' | 'journal' | 'card' | 'docs'
 
 export interface ThemePrefs {
   editBg: string
@@ -70,7 +70,7 @@ export function applyThemePrefs(prefs: ThemePrefs): void {
     else if (prefs.typography === 'academic') c.classList.add('typo-academic')
 
     // Markdown 风格类名
-    c.classList.remove('md-standard', 'md-github', 'md-notion', 'md-journal')
+    c.classList.remove('md-standard', 'md-github', 'md-notion', 'md-journal', 'md-card', 'md-docs')
     const mdClass = `md-${prefs.mdStyle || 'standard'}`
     c.classList.add(mdClass)
 
@@ -91,12 +91,15 @@ export function loadThemePrefs(): ThemePrefs {
     const raw = localStorage.getItem(STORE_KEY)
     if (!raw) return { ...DEFAULT_PREFS }
     const obj = JSON.parse(raw)
+    let mdStyle: any = obj.mdStyle
+    // 兼容：若历史保存为 terminal，则回退为 standard
+    if (mdStyle === 'terminal') mdStyle = 'standard'
     return {
       editBg: obj.editBg || DEFAULT_PREFS.editBg,
       readBg: obj.readBg || DEFAULT_PREFS.readBg,
       wysiwygBg: obj.wysiwygBg || DEFAULT_PREFS.wysiwygBg,
       typography: (['default','serif','modern','reading','academic'] as string[]).includes(obj.typography) ? obj.typography : 'default',
-      mdStyle: (['standard','github','notion','journal'] as string[]).includes(obj.mdStyle) ? obj.mdStyle : 'standard',
+      mdStyle: (['standard','github','notion','journal','card','docs'] as string[]).includes(mdStyle) ? mdStyle : 'standard',
       themeId: obj.themeId || undefined,
     }
   } catch { return { ...DEFAULT_PREFS } }
@@ -130,7 +133,7 @@ function registerTypography(id: TypographyId, label: string, css?: string): void
 }
 
 function registerMdStyle(id: MdStyleId, label: string, css?: string): void {
-  if (!['standard','github','notion','journal'].includes(id)) return
+  if (!['standard','github','notion','journal','card','docs'].includes(id)) return
   if (css) {
     try {
       const style = document.createElement('style')
@@ -184,10 +187,10 @@ function createPanel(): HTMLDivElement {
       <div class="theme-title">排版风格</div>
       <div class="theme-typos">
         <button class="typo-btn" data-typo="default">标准</button>
-        <button class="typo-btn" data-typo="serif">经典（衬线）</button>
-        <button class="typo-btn" data-typo="modern">现代（紧凑）</button>
-        <button class="typo-btn" data-typo="reading">阅读增强</button>
-        <button class="typo-btn" data-typo="academic">学术风</button>
+        <button class="typo-btn" data-typo="serif">经典</button>
+        <button class="typo-btn" data-typo="modern">现代</button>
+        <button class="typo-btn" data-typo="reading">阅读</button>
+        <button class="typo-btn" data-typo="academic">学术</button>
       </div>
     </div>
     <div class="theme-section">
@@ -197,6 +200,8 @@ function createPanel(): HTMLDivElement {
         <button class="md-btn" data-md="github">GitHub</button>
         <button class="md-btn" data-md="notion">Notion</button>
         <button class="md-btn" data-md="journal">出版风</button>
+        <button class="md-btn" data-md="card">卡片风</button>
+        <button class="md-btn" data-md="docs">Docs</button>
       </div>
     </div>
   `

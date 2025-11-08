@@ -2,13 +2,19 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.1.9
+- Added: Drag documents in the library to move between folders
+- Added: In Chinese IME, typing two ￥/¥ in a row maps to $$ (edit mode only)
+- Improved: Updater now includes changelog
+- Improved: After auto-installation fails, provide an option to open the download directory for manual installation fallback
+
 ## Update v0.1.8
-- Added: Export to PDF
-- Added: Export to DOCX and WPS; Mermaid supported
-- Fixed: Chinese recognition issue
-- Optimized: Removed unnecessary hot-reload content
-- Optimized: Build chunk splitting strategy
-- Optimized: Reduced entry chunk size
+- Added: Save as PDF
+- Added: Save as DOCX and WPS (Mermaid not supported)
+- Fixed: Code block language label no longer overlaps code lines
+- Improved: Removed unnecessary dependencies
+- Improved: Better cache utilization for performance
+- Improved: Split chunks to improve performance
 
 ## Update v0.1.7
 - Improved: Changed mermaid in WYSIWYG mode to global rendering / double-click image to edit code

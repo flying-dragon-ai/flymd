@@ -8,7 +8,10 @@
 
 跨平台 所见所得 图床上传 WebDav同步 插件扩展 响应迅速 占用极低的 Markdown 编辑 PDF 阅读工具。
 
-![lv_0_20251028184941](https://github.com/user-attachments/assets/3d6a5b6a-82e8-4d9d-9657-c9b66ef48f82)
+
+
+https://github.com/user-attachments/assets/46a22746-5fae-4fe3-878a-6ef5ebcecdd7
+
 
 
 ## ✨ 项目特色

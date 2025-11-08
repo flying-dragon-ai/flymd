@@ -1118,6 +1118,10 @@ body > .block-menu { display: none !important; }
   .container.md-github .preview table th { background: #161b22; }
   .container.md-github .preview table tbody tr:nth-child(even) { background: #0f141b; }
 
+  /* 深色主题下，阅读模式的 GitHub 风格代码块/行内代码（与浅色规则同等特异性，避免被覆盖） */
+  .container.md-github:not(.wysiwyg):not(.wysiwyg-v2) .preview pre { background: #0d1117; border-color: #30363d; }
+  .container.md-github:not(.wysiwyg):not(.wysiwyg-v2) .preview :not(pre) > code { background: #161b22; border-color: #30363d; color: #c9d1d9; }
+
   .container.md-notion .preview pre { background: #1c1c1a; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
   .container.md-notion .preview :not(pre) > code { background: #1a1917; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }
   .container.md-notion .preview table { border-color: rgba(255,255,255,0.08); }
@@ -1125,10 +1129,18 @@ body > .block-menu { display: none !important; }
   .container.md-notion .preview table td { border-color: rgba(255,255,255,0.08); }
   .container.md-notion .preview table th { background: rgba(255,255,255,0.04); }
 
+  /* 深色主题下，阅读模式的 Notion 风格代码块/行内代码（与浅色规则同等特异性，避免被覆盖） */
+  .container.md-notion:not(.wysiwyg):not(.wysiwyg-v2) .preview pre { background: #1c1c1a; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+  .container.md-notion:not(.wysiwyg):not(.wysiwyg-v2) .preview :not(pre) > code { background: #1a1917; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }
+
   .container.md-journal .preview pre { background: #141210; border-color: #3a332a; }
   .container.md-journal .preview :not(pre) > code { background: #17130f; border-color: #3a332a; }
   .container.md-journal .preview table th,
   .container.md-journal .preview table td { border-bottom-color: rgba(240,220,180,0.16); }
+
+  /* 深色主题下，阅读模式的 出版风（journal）代码块/行内代码（与浅色规则同等特异性，避免被覆盖） */
+  .container.md-journal:not(.wysiwyg):not(.wysiwyg-v2) .preview pre { background: #141210; border-color: #3a332a; }
+  .container.md-journal:not(.wysiwyg):not(.wysiwyg-v2) .preview :not(pre) > code { background: #17130f; border-color: #3a332a; }
 
   .container.md-github.wysiwyg-v2 .ProseMirror pre { background: #0d1117; border-color: #30363d; }
   .container.md-github.wysiwyg-v2 .ProseMirror :not(pre) > code { background: #161b22; border-color: #30363d; color: #c9d1d9; }

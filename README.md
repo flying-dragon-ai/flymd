@@ -31,7 +31,7 @@
 ## 📸 界面预览 0.2.2版本
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/27fc876d-0b94-4a94-8733-a0cb7b05466b" width="32%" alt="Markdown Editor Screenshot 1"/>
+  <img src="https://github.com/user-attachments/assets/661c3263-d877-4fcf-a77f-69096b42b9d5" width="32%" alt="Markdown Editor Screenshot 1"/>
   <img src="https://github.com/user-attachments/assets/1182c443-f93c-4167-bc05-f4cc4b391ab5" width="32%" alt="Markdown Editor Screenshot 2"/>
   <img src="https://github.com/user-attachments/assets/d51945f9-c227-43eb-8105-0bb07d66db52" width="32%" alt="Markdown Editor Screenshot 3"/>
 </p>

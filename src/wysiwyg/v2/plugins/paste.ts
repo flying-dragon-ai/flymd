@@ -2,6 +2,7 @@
 import type { Uploader } from '@milkdown/kit/plugin/upload'
 import type { Node as ProseNode, Schema } from '@milkdown/prose/model'
 import { uploadImageToS3R2, type UploaderConfig } from '../../../uploader/s3'
+import { transcodeToWebpIfNeeded } from '../../../utils/image'
 // 本地保存：在未启用图床或开启“总是保存到本地”时，将粘贴/拖拽的图片写入 images/ 或默认粘贴目录
 // 文件保存交给外层（main.ts）以避免在插件侧直接依赖 Tauri 插件
 
@@ -87,7 +88,18 @@ export const uploader: Uploader = async (files, schema) => {
     if (uploaderEnabled) {
       console.log('[Paste] 尝试上传图床...')
       try {
-        const res = await uploadImageToS3R2(img, img.name || 'image', img.type || 'application/octet-stream', upCfg)
+        let fileForUpload: Blob = img
+        let nameForUpload: string = img.name || 'image'
+        let typeForUpload: string = img.type || 'application/octet-stream'
+        try {
+          if ((upCfg as any)?.convertToWebp) {
+            const r = await transcodeToWebpIfNeeded(img, nameForUpload, (upCfg as any)?.webpQuality ?? 0.85, { skipAnimated: true })
+            fileForUpload = r.blob
+            nameForUpload = r.fileName
+            typeForUpload = r.type || 'image/webp'
+          }
+        } catch {}
+        const res = await uploadImageToS3R2(fileForUpload, nameForUpload, typeForUpload, upCfg)
         cloudUrl = res?.publicUrl || ''
         console.log('[Paste] 图床上传结果:', cloudUrl)
       } catch (e) {

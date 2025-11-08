@@ -36,6 +36,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import fileTree from './fileTree'
 import { uploadImageToS3R2, type UploaderConfig } from './uploader/s3'
+import { transcodeToWebpIfNeeded } from './utils/image'
 import appIconUrl from '../flymd.png?url'
 import goodImgUrl from '../good.png?url'
 import { decorateCodeBlocks } from './decorate'
@@ -986,17 +987,29 @@ async function saveImageToLocalAndGetPath(file: File, fname: string): Promise<st
       return null
     }
 
+    // 统一处理：是否对本地保存也转 WebP
+    const { saveLocalAsWebp, webpQuality } = await getTranscodePrefs()
+    let blobForSave: Blob = file
+    let nameForSave: string = fname
+    try {
+      if (saveLocalAsWebp) {
+        const r = await transcodeToWebpIfNeeded(file, fname, webpQuality, { skipAnimated: true })
+        blobForSave = r.blob
+        nameForSave = r.fileName
+      }
+    } catch {}
+
     // 生成不重复文件名：pasted-YYYYMMDD-HHmmss-rand.ext
     const guessExt = (): string => {
       try {
-        const byName = (fname || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]
+        const byName = (nameForSave || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]
         if (byName) return byName
-        const t = (file.type || '').toLowerCase()
+        const t = (blobForSave.type || '').toLowerCase()
+        if (t.includes('webp')) return 'webp'
         if (t.includes('png')) return 'png'
         if (t.includes('jpeg')) return 'jpg'
         if (t.includes('jpg')) return 'jpg'
         if (t.includes('gif')) return 'gif'
-        if (t.includes('webp')) return 'webp'
         if (t.includes('bmp')) return 'bmp'
         if (t.includes('avif')) return 'avif'
         if (t.includes('svg')) return 'svg'
@@ -1025,7 +1038,7 @@ async function saveImageToLocalAndGetPath(file: File, fname: string): Promise<st
     const writeTo = async (targetDir: string): Promise<string> => {
       try { await ensureDir(targetDir) } catch {}
       const dst = await ensureUniquePath(targetDir)
-      const buf = new Uint8Array(await file.arrayBuffer())
+      const buf = new Uint8Array(await blobForSave.arrayBuffer())
       await writeFile(dst as any, buf as any)
       return dst
     }
@@ -1857,6 +1870,28 @@ wysiwygCaretEl.id = 'wysiwyg-caret'
           <div class="upl-field"><input id="upl-pathstyle" type="checkbox" /></div>
           <label for="upl-acl">${t('upl.acl')}</label>
           <div class="upl-field"><input id="upl-acl" type="checkbox" checked /></div>
+          <label for="upl-webp-enable">${t('upl.webp.enable')}</label>
+          <div class="upl-field">
+            <label class="switch">
+              <input id="upl-webp-enable" type="checkbox" />
+              <span class="trk"></span><span class="kn"></span>
+            </label>
+          </div>
+          <label for="upl-webp-quality">${t('upl.webp.quality')}</label>
+          <div class="upl-field">
+            <div style="display:flex;align-items:center;gap:8px;min-width:220px;">
+              <input id="upl-webp-quality" type="range" min="0.6" max="0.95" step="0.01" value="0.85" />
+              <span id="upl-webp-quality-val">0.85</span>
+            </div>
+            <div class="upl-hint" id="upl-webp-quality-hint">${t('upl.webp.quality.hint')}</div>
+          </div>
+          <label for="upl-webp-local">${t('upl.webp.local')}</label>
+          <div class="upl-field">
+            <label class="switch">
+              <input id="upl-webp-local" type="checkbox" />
+              <span class="trk"></span><span class="kn"></span>
+            </label>
+          </div>
         </div>
         <div class="upl-actions">
           <div id="upl-test-result"></div>
@@ -4042,6 +4077,9 @@ async function getUploaderConfig(): Promise<UploaderConfig | null> {
       keyTemplate: typeof o.keyTemplate === 'string' ? o.keyTemplate : '{year}/{month}{fileName}{md5}.{extName}',
       aclPublicRead: o.aclPublicRead !== false,
       forcePathStyle: o.forcePathStyle !== false,
+      convertToWebp: !!o.convertToWebp,
+      webpQuality: (typeof o.webpQuality === 'number' ? o.webpQuality : 0.85),
+      saveLocalAsWebp: !!o.saveLocalAsWebp,
     }
     if (!cfg.enabled) return null
     if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) return null
@@ -4075,6 +4113,20 @@ async function getAlwaysSaveLocalImages(): Promise<boolean> {
     if (!up || typeof up !== 'object') return false
     return !!(up as any).alwaysLocal
   } catch { return false }
+}
+
+// 读取图片转码偏好（即使未启用图床也可读取）
+async function getTranscodePrefs(): Promise<{ convertToWebp: boolean; webpQuality: number; saveLocalAsWebp: boolean }> {
+  try {
+    if (!store) return { convertToWebp: false, webpQuality: 0.85, saveLocalAsWebp: false }
+    const up = await store.get('uploader')
+    const o = (up && typeof up === 'object') ? (up as any) : null
+    return {
+      convertToWebp: !!o?.convertToWebp,
+      webpQuality: (typeof o?.webpQuality === 'number' ? o.webpQuality : 0.85),
+      saveLocalAsWebp: !!o?.saveLocalAsWebp,
+    }
+  } catch { return { convertToWebp: false, webpQuality: 0.85, saveLocalAsWebp: false } }
 }
 
 
@@ -4116,6 +4168,10 @@ async function openUploaderDialog() {
   const inputTpl = overlay.querySelector('#upl-template') as HTMLInputElement
   const inputPathStyle = overlay.querySelector('#upl-pathstyle') as HTMLInputElement
   const inputAcl = overlay.querySelector('#upl-acl') as HTMLInputElement
+  const inputWebpEnable = overlay.querySelector('#upl-webp-enable') as HTMLInputElement
+  const inputWebpQuality = overlay.querySelector('#upl-webp-quality') as HTMLInputElement
+  const labelWebpQualityVal = overlay.querySelector('#upl-webp-quality-val') as HTMLSpanElement
+  const inputWebpLocal = overlay.querySelector('#upl-webp-local') as HTMLInputElement
   const btnCancel = overlay.querySelector('#upl-cancel') as HTMLButtonElement
   const btnClose = overlay.querySelector('#upl-close') as HTMLButtonElement
   const btnTest = overlay.querySelector('#upl-test') as HTMLButtonElement
@@ -4136,6 +4192,11 @@ async function openUploaderDialog() {
       inputTpl.value = up?.keyTemplate || '{year}/{month}{fileName}{md5}.{extName}'
       inputPathStyle.checked = up?.forcePathStyle !== false
       inputAcl.checked = up?.aclPublicRead !== false
+      inputWebpEnable.checked = !!up?.convertToWebp
+      const q = typeof up?.webpQuality === 'number' ? up.webpQuality : 0.85
+      inputWebpQuality.value = String(q)
+      if (labelWebpQualityVal) labelWebpQualityVal.textContent = String(Number(q).toFixed(2))
+      inputWebpLocal.checked = !!up?.saveLocalAsWebp
     }
   } catch {}
 
@@ -4156,6 +4217,9 @@ async function openUploaderDialog() {
           keyTemplate: inputTpl.value.trim() || '{year}/{month}{fileName}{md5}.{extName}',
           forcePathStyle: !!inputPathStyle.checked,
           aclPublicRead: !!inputAcl.checked,
+          convertToWebp: !!inputWebpEnable.checked,
+          webpQuality: (() => { const n = parseFloat(inputWebpQuality.value); return Number.isFinite(n) ? n : 0.85 })(),
+          saveLocalAsWebp: !!inputWebpLocal.checked,
         }
         if (cfg.enabled && !cfg.alwaysLocal) {
           if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) {
@@ -4169,6 +4233,12 @@ async function openUploaderDialog() {
     }
     inputEnabled.addEventListener('change', () => { void applyImmediate() })
     inputAlwaysLocal.addEventListener('change', () => { void applyImmediate() })
+    inputWebpEnable.addEventListener('change', () => { void applyImmediate() })
+    inputWebpQuality.addEventListener('input', () => {
+      try { if (labelWebpQualityVal) labelWebpQualityVal.textContent = String(Number(parseFloat(inputWebpQuality.value)).toFixed(2)) } catch {}
+    })
+    inputWebpQuality.addEventListener('change', () => { void applyImmediate() })
+    inputWebpLocal.addEventListener('change', () => { void applyImmediate() })
   } catch {}
 
   const onCancel = () => { showUploaderOverlay(false) }
@@ -4187,6 +4257,9 @@ async function openUploaderDialog() {
         keyTemplate: inputTpl.value.trim() || '{year}/{month}{fileName}{md5}.{extName}',
         forcePathStyle: !!inputPathStyle.checked,
         aclPublicRead: !!inputAcl.checked,
+        convertToWebp: !!inputWebpEnable.checked,
+        webpQuality: (() => { const n = parseFloat(inputWebpQuality.value); return Number.isFinite(n) ? n : 0.85 })(),
+        saveLocalAsWebp: !!inputWebpLocal.checked,
       }
       if (cfg.enabled && !cfg.alwaysLocal) {
         if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) {
@@ -4708,6 +4781,9 @@ function applyI18nUi() {
         setLabel('upl-template', t('upl.template'))
         setLabel('upl-pathstyle', t('upl.pathstyle'))
         setLabel('upl-acl', t('upl.acl'))
+        setLabel('upl-webp-enable', t('upl.webp.enable'))
+        setLabel('upl-webp-quality', t('upl.webp.quality'))
+        setLabel('upl-webp-local', t('upl.webp.local'))
         const setPh = (id: string, ph: string) => { const inp = uplRoot.querySelector(`#${id}`) as HTMLInputElement | null; if (inp) inp.placeholder = ph }
         setPh('upl-ak', t('upl.ak.ph'))
         setPh('upl-sk', t('upl.sk.ph'))
@@ -4724,6 +4800,7 @@ function applyI18nUi() {
         if (hints[0]) hints[0].textContent = t('upl.hint.alwaysLocal')
         if (hints[1]) hints[1].textContent = t('upl.endpoint.hint')
         if (hints[2]) hints[2].textContent = t('upl.domain.hint')
+        if (hints[3]) hints[3].textContent = t('upl.webp.quality.hint')
         if (hints[3]) hints[3].textContent = t('upl.template.hint')
       }
     } catch {}
@@ -5976,8 +6053,19 @@ function bindEvents() {
             for (const f of files) {
               if (extIsImage(f.name) || (f.type && f.type.startsWith('image/'))) {
                 try {
-                  const pub = await uploadImageToS3R2(f, f.name, f.type || 'application/octet-stream', upCfg)
-                  partsUpload.push(`![${f.name}](${pub.publicUrl})`)
+                  let fileForUpload: Blob = f
+                  let nameForUpload: string = f.name
+                  let typeForUpload: string = f.type || 'application/octet-stream'
+                  try {
+                    if (upCfg?.convertToWebp) {
+                      const r = await transcodeToWebpIfNeeded(f, nameForUpload, upCfg.webpQuality ?? 0.85, { skipAnimated: true })
+                      fileForUpload = r.blob
+                      nameForUpload = r.fileName
+                      typeForUpload = r.type || 'image/webp'
+                    }
+                  } catch {}
+                  const pub = await uploadImageToS3R2(fileForUpload, nameForUpload, typeForUpload, upCfg)
+                  partsUpload.push(`![${nameForUpload}](${pub.publicUrl})`)
                 } catch (e) {
                   console.warn('直连上传失败，跳过此文件使用本地兜底', f.name, e)
                 }
@@ -6196,9 +6284,19 @@ function bindEvents() {
                         return 'application/octet-stream'
                       })()
                       const bytes = await readFile(p as any)
-                      const blob = new Blob([bytes], { type: mime })
-                      const pub = await uploadImageToS3R2(blob, name, mime, upCfg)
-                      parts.push(`![${name}](${pub.publicUrl})`)
+                      let blob: Blob = new Blob([bytes], { type: mime })
+                      let name2: string = name
+                      let mime2: string = mime
+                      try {
+                        if (upCfg?.convertToWebp) {
+                          const r = await transcodeToWebpIfNeeded(blob, name, upCfg.webpQuality ?? 0.85, { skipAnimated: true })
+                          blob = r.blob
+                          name2 = r.fileName
+                          mime2 = r.type || 'image/webp'
+                        }
+                      } catch {}
+                      const pub = await uploadImageToS3R2(blob, name2, mime2, upCfg)
+                      parts.push(`![${name2}](${pub.publicUrl})`)
                     } catch (e) {
                       console.warn('单张图片上传失败，跳过：', p, e)
                       const needAngle = /[\s()]/.test(p) || /^[a-zA-Z]:/.test(p) || /\\/.test(p)
@@ -6372,8 +6470,19 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
             const sep = base.includes('\\') ? '\\' : '/'
             const imgDir = base + sep + 'images'
             await ensureDir(imgDir)
-            const dst = imgDir + sep + fname
-            const buf = new Uint8Array(await file.arrayBuffer())
+            // 根据用户偏好决定是否转为 WebP 再本地保存
+            const { saveLocalAsWebp, webpQuality } = await getTranscodePrefs()
+            let blobForSave: Blob = file
+            let nameForSave: string = fname
+            try {
+              if (saveLocalAsWebp) {
+                const r = await transcodeToWebpIfNeeded(file, fname, webpQuality, { skipAnimated: true })
+                blobForSave = r.blob
+                nameForSave = r.fileName
+              }
+            } catch {}
+            const dst = imgDir + sep + nameForSave
+            const buf = new Uint8Array(await blobForSave.arrayBuffer())
             await writeFile(dst as any, buf as any)
             localPath = dst
             console.log('[Upload] 本地保存成功:', localPath)
@@ -6389,8 +6498,18 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
             if (dir) {
               const baseDir = dir.replace(/[\\/]+$/, '')
               const sep = baseDir.includes('\\') ? '\\' : '/'
-              const dst = baseDir + sep + fname
-              const buf = new Uint8Array(await file.arrayBuffer())
+              const { saveLocalAsWebp, webpQuality } = await getTranscodePrefs()
+              let blobForSave: Blob = file
+              let nameForSave: string = fname
+              try {
+                if (saveLocalAsWebp) {
+                  const r = await transcodeToWebpIfNeeded(file, fname, webpQuality, { skipAnimated: true })
+                  blobForSave = r.blob
+                  nameForSave = r.fileName
+                }
+              } catch {}
+              const dst = baseDir + sep + nameForSave
+              const buf = new Uint8Array(await blobForSave.arrayBuffer())
               await ensureDir(baseDir)
               await writeFile(dst as any, buf as any)
               localPath = dst
@@ -6408,8 +6527,18 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
             if (pic) {
               const baseDir = pic.replace(/[\\/]+$/, '')
               const sep = baseDir.includes('\\') ? '\\' : '/'
-              const dst = baseDir + sep + fname
-              const buf = new Uint8Array(await file.arrayBuffer())
+              const { saveLocalAsWebp, webpQuality } = await getTranscodePrefs()
+              let blobForSave: Blob = file
+              let nameForSave: string = fname
+              try {
+                if (saveLocalAsWebp) {
+                  const r = await transcodeToWebpIfNeeded(file, fname, webpQuality, { skipAnimated: true })
+                  blobForSave = r.blob
+                  nameForSave = r.fileName
+                }
+              } catch {}
+              const dst = baseDir + sep + nameForSave
+              const buf = new Uint8Array(await blobForSave.arrayBuffer())
               await ensureDir(baseDir)
               await writeFile(dst as any, buf as any)
               localPath = dst
@@ -6425,7 +6554,18 @@ function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
       if (uploaderEnabled) {
         console.log('[Upload] 尝试图床上传...')
         try {
-          const res = await uploadImageToS3R2(file, fname, file.type || 'application/octet-stream', upCfg)
+          let fileForUpload: Blob = file
+          let nameForUpload: string = fname
+          let typeForUpload: string = file.type || 'application/octet-stream'
+          try {
+            if (upCfg?.convertToWebp) {
+              const r = await transcodeToWebpIfNeeded(file, fname, upCfg.webpQuality ?? 0.85, { skipAnimated: true })
+              fileForUpload = r.blob
+              nameForUpload = r.fileName
+              typeForUpload = r.type || 'image/webp'
+            }
+          } catch {}
+          const res = await uploadImageToS3R2(fileForUpload, nameForUpload, typeForUpload, upCfg)
           cloudUrl = res.publicUrl
           console.log('[Upload] 图床上传成功:', cloudUrl)
         } catch (e) {
@@ -6499,13 +6639,24 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
             const sep = base.includes('\\') ? '\\' : '/'
             const imgDir = base + sep + 'images'
             try { await ensureDir(imgDir) } catch {}
-            const dst = imgDir + sep + fname
+            // 根据偏好决定是否转为 WebP 再本地保存
+            const { saveLocalAsWebp, webpQuality } = await getTranscodePrefs()
+            let blobForSave: Blob = blob
+            let nameForSave: string = fname
             try {
-              const bytes = new Uint8Array(await blob.arrayBuffer())
+              if (saveLocalAsWebp) {
+                const r = await transcodeToWebpIfNeeded(blob, fname, webpQuality, { skipAnimated: true })
+                blobForSave = r.blob
+                nameForSave = r.fileName
+              }
+            } catch {}
+            const dst = imgDir + sep + nameForSave
+            try {
+              const bytes = new Uint8Array(await blobForSave.arrayBuffer())
               await writeFile(dst as any, bytes as any)
               const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
               const mdUrl = needAngle ? `<${dst}>` : dst
-              replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
+              replaceUploadingPlaceholder(id, `![${nameForSave}](${mdUrl})`)
               return
             } catch {}
           }
@@ -6516,14 +6667,24 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
             if (dir) {
               const baseDir = dir.replace(/[\\/]+$/, '')
               const sep = baseDir.includes('\\') ? '\\' : '/'
-              const dst = baseDir + sep + fname
+              const { saveLocalAsWebp, webpQuality } = await getTranscodePrefs()
+              let blobForSave: Blob = blob
+              let nameForSave: string = fname
               try {
-                const bytes = new Uint8Array(await blob.arrayBuffer())
+                if (saveLocalAsWebp) {
+                  const r = await transcodeToWebpIfNeeded(blob, fname, webpQuality, { skipAnimated: true })
+                  blobForSave = r.blob
+                  nameForSave = r.fileName
+                }
+              } catch {}
+              const dst = baseDir + sep + nameForSave
+              try {
+                const bytes = new Uint8Array(await blobForSave.arrayBuffer())
                 try { await ensureDir(baseDir) } catch {}
                 await writeFile(dst as any, bytes as any)
                 const needAngle = /[\s()]/.test(dst) || /^[a-zA-Z]:/.test(dst) || /\\/.test(dst)
                 const mdUrl = needAngle ? `<${dst}>` : dst
-                replaceUploadingPlaceholder(id, `![${fname}](${mdUrl})`)
+                replaceUploadingPlaceholder(id, `![${nameForSave}](${mdUrl})`)
                 return
               } catch {}
             }
@@ -6540,8 +6701,19 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
     try {
       const upCfg = await getUploaderConfig()
       if (upCfg) {
-        const res = await uploadImageToS3R2(blob, fname, mime || 'application/octet-stream', upCfg)
-        replaceUploadingPlaceholder(id, `![${fname}](${res.publicUrl})`)
+        let blob2: Blob = blob
+        let name2: string = fname
+        let mime2: string = mime || 'application/octet-stream'
+        try {
+          if (upCfg?.convertToWebp) {
+            const r = await transcodeToWebpIfNeeded(blob, fname, upCfg.webpQuality ?? 0.85, { skipAnimated: true })
+            blob2 = r.blob
+            name2 = r.fileName
+            mime2 = r.type || 'image/webp'
+          }
+        } catch {}
+        const res = await uploadImageToS3R2(blob2, name2, mime2, upCfg)
+        replaceUploadingPlaceholder(id, `![${name2}](${res.publicUrl})`)
         return
       }
     } catch {}

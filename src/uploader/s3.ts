@@ -15,6 +15,10 @@ export type UploaderConfig = {
   keyTemplate?: string
   aclPublicRead?: boolean
   forcePathStyle?: boolean
+  // 新增：前端转码为 WebP 的配置（可选）
+  convertToWebp?: boolean
+  webpQuality?: number
+  saveLocalAsWebp?: boolean
 }
 
 function isTauriRuntime(): boolean {

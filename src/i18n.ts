@@ -120,6 +120,11 @@ const dict = {
     'upl.section.advanced': '高级选项',
     'upl.pathstyle': 'Path-Style（R2 建议）',
     'upl.acl': 'public-read',
+    // WebP 转换
+    'upl.webp.enable': '上传前转为 WebP',
+    'upl.webp.quality': 'WebP 质量',
+    'upl.webp.quality.hint': '范围 0.6–0.95，默认 0.85；数值越大质量越高但体积更大',
+    'upl.webp.local': '本地保存也转为 WebP',
 
     // WebDAV 同步
     'sync.title': 'WebDAV 同步设置',
@@ -271,6 +276,11 @@ const dict = {
     'upl.section.advanced': 'Advanced',
     'upl.pathstyle': 'Path-Style (recommended for R2)',
     'upl.acl': 'public-read',
+    // WebP conversion
+    'upl.webp.enable': 'Convert to WebP before upload',
+    'upl.webp.quality': 'WebP Quality',
+    'upl.webp.quality.hint': 'Range 0.6–0.95, default 0.85; higher = better quality but larger size',
+    'upl.webp.local': 'Also convert local saves to WebP',
 
     // WebDAV Sync
     'sync.title': 'WebDAV Sync Settings',

@@ -171,6 +171,14 @@ html, body {
   background: var(--bg);
 }
 
+/* 编辑模式：定宽居中（与阅读/所见一致） */
+.container:not(.wysiwyg):not(.wysiwyg-v2) .editor {
+  /* 让内容区域左右居中，宽度与预览一致 */
+  display: block;
+  width: min(100%, 860px);
+  margin: 0 auto;
+}
+
 .preview {
   position: absolute; inset: 0;
   /* 仅显示竖向滚动条，隐藏横向滚动条，避免页面抖动且更清爽 */

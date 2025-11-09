@@ -73,6 +73,11 @@ function applyUiZoom(): void {
     // 预览/WYSIWYG 字号基准 16px
     try { const pv = document.getElementById('preview') as HTMLDivElement | null; if (pv) pv.style.fontSize = (16 * scale).toFixed(2) + 'px' } catch {}
     try { const pm = document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement | null; if (pm) pm.style.fontSize = (16 * scale).toFixed(2) + 'px' } catch {}
+    // 更新状态栏缩放显示
+    try {
+      const label = document.getElementById('zoom-label') as HTMLSpanElement | null
+      if (label) label.textContent = Math.round(scale * 100) + '%'
+    } catch {}
   } catch {}
 }
 function setUiZoom(next: number): void {
@@ -818,6 +823,7 @@ app.innerHTML = `
     <textarea id="editor" class="editor" spellcheck="false" placeholder="${t('editor.placeholder')}"></textarea>
     <div id="preview" class="preview hidden"></div>
     <div class="statusbar" id="status">${fmtStatus(1,1)}</div>
+    <div class="status-zoom" id="status-zoom"><span id="zoom-label">100%</span> <button id="zoom-reset" title="重置缩放">重置</button></div>
   </div>
 `
 try { logInfo('打点:DOM就绪') } catch {}
@@ -1633,15 +1639,56 @@ try {
         e.preventDefault()
         const dy = e.deltaY || 0
         if (dy < 0) zoomIn(); else if (dy > 0) zoomOut()
+        showZoomBubble()
       }
     } catch {}
   }
   // 容器上监听，passive: false 以便阻止默认行为（浏览器页面缩放）
   if (containerEl) containerEl.addEventListener('wheel', wheelZoom, { passive: false })
+  // 绑定“重置缩放”按钮
+  try {
+    const btn = document.getElementById('zoom-reset') as HTMLButtonElement | null
+    if (btn) btn.addEventListener('click', () => { try { zoomReset() } catch {} })
+  } catch {}
 } catch {}
 
 // 初始化应用缩放：读取已保存缩放并应用到编辑/预览/WYSIWYG
 try { applyUiZoom() } catch {}
+
+// ===== 缩放气泡（类似 Edge） =====
+let _zoomBubbleTimer: number | null = null
+function ensureZoomBubble(): HTMLDivElement | null {
+  try {
+    let el = document.getElementById('zoom-bubble') as HTMLDivElement | null
+    if (!el) {
+      el = document.createElement('div')
+      el.id = 'zoom-bubble'
+      el.className = 'zoom-bubble hidden'
+      el.innerHTML = `
+        <span id="zoom-bubble-label">100%</span>
+        <button id="zoom-bubble-reset" class="zoom-reset-btn" title="重置缩放" aria-label="重置缩放">⟲ 重置</button>
+      `
+      document.body.appendChild(el)
+      const btn = el.querySelector('#zoom-bubble-reset') as HTMLButtonElement | null
+      if (btn) btn.addEventListener('click', () => { try { zoomReset(); showZoomBubble() } catch {} })
+    }
+    return el
+  } catch { return null }
+}
+function showZoomBubble(): void {
+  try {
+    const el = ensureZoomBubble(); if (!el) return
+    const label = el.querySelector('#zoom-bubble-label') as HTMLSpanElement | null
+    if (label) label.textContent = Math.round(getUiZoom() * 100) + '%'
+    el.classList.remove('hidden')
+    el.classList.add('show')
+    if (_zoomBubbleTimer != null) { window.clearTimeout(_zoomBubbleTimer); _zoomBubbleTimer = null }
+    _zoomBubbleTimer = window.setTimeout(() => {
+      try { el!.classList.remove('show'); el!.classList.add('hidden') } catch {}
+      _zoomBubbleTimer = null
+    }, 1000)
+  } catch {}
+}
 let _wheelHandlerRef: ((e: WheelEvent)=>void) | null = null
   if (containerEl) {
   // 修复在所见模式中滚轮无法滚动编辑区的问题：

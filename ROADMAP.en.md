@@ -2,6 +2,12 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.2.4
+- Added: Editor/Plugin APIs to empower AI extensions (insert at cursor, streaming output, replace selection)
+- Added: Plugin store sorting and "Featured" badge styling
+- Added: Multiple libraries support
+- Fixed: Extension buttons missing after restart due to not being registered on startup
+
 ## Update v0.2.3
 - Added: Custom font support (Theme panel). Supports picking system fonts and installing user fonts for use in the app.
 - Added: Zoom in/out via Ctrl/Cmd + mouse wheel in Edit, Reading and WYSIWYG modes.

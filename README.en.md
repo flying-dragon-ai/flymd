@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-v0.2.3-blue.svg)](https://github.com/flyhunterl/flymd)
+[![Version](https://img.shields.io/badge/version-v0.2.4-blue.svg)](https://github.com/flyhunterl/flymd)
 [![License](https://img.shields.io/badge/license-NonCommercial-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/flyhunterl/flymd)
 
@@ -15,7 +15,7 @@ A cross-platform WYSIWYG Markdown editor and PDF reader with image hosting, WebD
 
 - Ready to Use: Only 6MB installer, no bloat. Millisecond-level cold start, one-click code copy
 - Clean Interface: Minimalist design with just menubar + editor, focused on content creation. Excellent startup and response speed
-- Library Feature: Support for designated folders, tree-view display of subfolders and documents, with document management
+- Library Feature: Support for designated folders, tree-view display of subfolders and documents, with document management; supports multiple libraries
 - Secure & Reliable: Local execution, no network connection, automatic HTML sanitization in preview
 - Image Hosting: S3/R2 binding support, direct paste image upload with automatic link syntax generation
 - Full-Featured: Complete support for Markdown, LaTeX, Mermaid, and HTML
@@ -24,6 +24,7 @@ A cross-platform WYSIWYG Markdown editor and PDF reader with image hosting, WebD
 - Position Memory: Automatic memory of reading and editing positions, returning to remembered positions on next open (v0.0.6 official)
 - Auto Sync: WebDAV sync functionality
 - Plugin Extensions: Support for plugin extensions, develop your own or install with one click
+- AI Assistant: Install from the Extensions market to polish, correct and summarize content
 
 - Export formats: Export to PDF, DOCX, WPS
 ## 📸 Interface Preview (v0.2.2)

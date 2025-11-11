@@ -2,7 +2,7 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
-## Update v0.2.5 (upcoming)
+## Update v0.2.5 
 - Added: Mermaid zoom support in Reading/WYSIWYG modes
 - Added: Export Mermaid as standalone SVG
 - Improved: Handle array returns from open dialogs; fixes some macOS cases where files failed to load on open

@@ -2,7 +2,7 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
-## 更新 v0.2.5（即将发布）
+## 更新 v0.2.5
 - 新增： Mermaid在阅读/所见模式中的缩放功能
 - 新增： Mermaid单独导出为SVG
 - 改进： 处理对话框数组返回，解决部分MacOS打开文件无法载入的问题

@@ -1160,6 +1160,37 @@ async function renderPreviewLight() {
     RETURN_DOM_FRAGMENT: false,
     ALLOWED_URI_REGEXP: /^(?:(?:https?|asset|data|blob|file):|\/|\.\.?[\/\\]|[a-zA-Z]:(?:[\/\\]|%5[cC]|%2[fF])|(?:%5[cC]){2})/i
   })
+  // 生产环境补丁：若 DOMPurify 清洗掉了 KaTeX SVG 的关键属性（如 path@d），从未清洗 HTML 中恢复
+  try {
+    const tempDiv = document.createElement('div')
+    tempDiv.innerHTML = safe
+    const katexSvgs = tempDiv.querySelectorAll('.katex svg')
+    let needsFix = false
+    katexSvgs.forEach(svg => {
+      if (!svg.getAttribute('viewBox')) needsFix = true
+      svg.querySelectorAll('path').forEach(p => { if (!p.getAttribute('d')) needsFix = true })
+    })
+    if (needsFix && html.includes('katex')) {
+      const originalDiv = document.createElement('div')
+      originalDiv.innerHTML = html
+      const originalSvgs = originalDiv.querySelectorAll('.katex svg')
+      originalSvgs.forEach((origSvg, i) => {
+        const cleanedSvg = katexSvgs[i] as SVGElement
+        if (!cleanedSvg) return
+        const svgAttrs = ['viewBox','width','height','preserveAspectRatio']
+        svgAttrs.forEach(attr => { const v = origSvg.getAttribute(attr); if (v && !cleanedSvg.getAttribute(attr)) cleanedSvg.setAttribute(attr, v) })
+        const origPaths = origSvg.querySelectorAll('path')
+        const cleanedPaths = cleanedSvg.querySelectorAll('path')
+        origPaths.forEach((op, j) => {
+          const d = op.getAttribute('d')
+          const cp = cleanedPaths[j]
+          if (d && cp && !cp.getAttribute('d')) { try { cp.setAttribute('d', d) } catch {} }
+        })
+      })
+      preview.innerHTML = `<div class="preview-body">${tempDiv.innerHTML}</div>`
+      return
+    }
+  } catch {}
   try { preview.innerHTML = `<div class="preview-body">${safe}</div>` } catch {}
   // 轻渲染后也生成锚点，提升滚动同步体验
   // 旧所见模式移除：不再重建锚点表
@@ -2557,6 +2588,37 @@ async function renderPreview() {
 
   console.log('DOMPurify 清理后的 HTML 片段:', safe.substring(0, 500))
   // 包裹一层容器，用于样式定宽居中显示
+  // 生产环境补丁：若 DOMPurify 清洗掉了 KaTeX SVG 的关键属性（如 path@d），从未清洗 HTML 中恢复
+  try {
+    const tempDiv = document.createElement('div')
+    tempDiv.innerHTML = safe
+    const katexSvgs = tempDiv.querySelectorAll('.katex svg')
+    let needsFix = false
+    katexSvgs.forEach(svg => {
+      if (!svg.getAttribute('viewBox')) needsFix = true
+      svg.querySelectorAll('path').forEach(p => { if (!p.getAttribute('d')) needsFix = true })
+    })
+    if (needsFix && html.includes('katex')) {
+      const originalDiv = document.createElement('div')
+      originalDiv.innerHTML = html
+      const originalSvgs = originalDiv.querySelectorAll('.katex svg')
+      originalSvgs.forEach((origSvg, i) => {
+        const cleanedSvg = katexSvgs[i] as SVGElement
+        if (!cleanedSvg) return
+        const svgAttrs = ['viewBox','width','height','preserveAspectRatio']
+        svgAttrs.forEach(attr => { const v = origSvg.getAttribute(attr); if (v && !cleanedSvg.getAttribute(attr)) cleanedSvg.setAttribute(attr, v) })
+        const origPaths = origSvg.querySelectorAll('path')
+        const cleanedPaths = cleanedSvg.querySelectorAll('path')
+        origPaths.forEach((op, j) => {
+          const d = op.getAttribute('d')
+          const cp = cleanedPaths[j]
+          if (d && cp && !cp.getAttribute('d')) { try { cp.setAttribute('d', d) } catch {} }
+        })
+      })
+      preview.innerHTML = `<div class="preview-body">${tempDiv.innerHTML}</div>`
+      return
+    }
+  } catch {}
   preview.innerHTML = `<div class="preview-body">${safe}</div>`
   try { decorateCodeBlocks(preview) } catch {}
   // WYSIWYG 防闪烁：使用离屏容器完成 Mermaid 替换后一次性提交

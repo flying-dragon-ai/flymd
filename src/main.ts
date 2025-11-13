@@ -5706,8 +5706,10 @@ function bindEvents() {
   // 全局快捷键：Ctrl+H 打开查找替换
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     try {
+      // 查找面板打开时，回车键用于切换到下一个/上一个（在所有模式下都拦截）
       if (_findPanel && _findPanel.style.display !== 'none' && e.key === 'Enter') {
         e.preventDefault()
+        e.stopPropagation()
         if (e.shiftKey) { if (_findPrevFn) _findPrevFn() } else { if (_findNextFn) _findNextFn(true) }
         return
       }
@@ -5715,7 +5717,7 @@ function bindEvents() {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'h') { e.preventDefault(); showFindPanel(); return }
       if (e.key === 'Escape' && _findPanel && _findPanel.style.display !== 'none') { e.preventDefault(); _findPanel.style.display = 'none'; if (wysiwyg) { try { (document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement)?.focus() } catch {} } else { try { editor.focus() } catch {} } ; return }
     } catch {}
-  })
+  }, true)  // 使用捕获阶段，确保在其他监听器之前处理
 
   // 撤销友好插入/删除：通过 execCommand / setRangeText 保持到原生撤销栈
   function insertUndoable(ta: HTMLTextAreaElement, text: string): boolean {

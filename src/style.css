@@ -2006,3 +2006,16 @@ textarea:focus {
 #find-replace-panel[data-mode="find-only"] #btn-replace-all {
   display: none;
 }
+
+/* Ctrl+F 查找模式下，把“上一个 / 下一个 / 关闭”三按钮挤到同一行 */
+#find-replace-panel[data-mode="find-only"] > div:nth-of-type(2) {
+  display: inline-flex !important;
+}
+#find-replace-panel[data-mode="find-only"] > div:nth-of-type(3) {
+  display: inline-flex !important;
+  margin-top: 0 !important;
+  margin-left: 8px;
+}
+#find-replace-panel[data-mode="find-only"] #btn-close-find {
+  margin-left: 8px !important;
+}

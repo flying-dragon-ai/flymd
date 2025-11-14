@@ -37,6 +37,17 @@
         "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/ai-assistant/manifest.json",
         "type": "manifest"
       }
+    },
+    {
+      "homepage": "https://github.com/flyhunterl/flymd",
+      "name": "批量导出 PDF",
+      "description": "一次选择多个文档并批量导出为 PDF",
+      "author": "飞速MarkDown",
+      "id": "batch-pdf",
+      "install": {
+        "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/batch-pdf/manifest.json",
+        "type": "manifest"
+      }
     }
   ]
 }

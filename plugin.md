@@ -277,6 +277,57 @@ context.setEditorValue(current + '\n\n附加的内容');
 - 更新标题栏和状态栏
 - 如果在预览模式，会自动重新渲染预览
 
+### context.pickDocFiles
+
+在桌面版中弹出文件选择对话框，选择一个或多个 Markdown 文档（`md / markdown / txt`），返回绝对路径数组。
+
+```javascript
+// 选择多个文档
+const files = await context.pickDocFiles({ multiple: true });
+
+if (!files || files.length === 0) {
+  context.ui.notice('未选择任何文档', 'err');
+} else {
+  context.ui.notice('已选择 ' + files.length + ' 个文档', 'ok');
+}
+```
+
+**注意：**
+- 仅在桌面版（Tauri 应用）可用，浏览器环境会返回空数组并弹出提示。
+- 返回值为字符串数组，每一项是文件的绝对路径。
+
+### context.openFileByPath
+
+按给定绝对路径打开本地文档，相当于用户在界面中打开该文件。
+
+```javascript
+// 打开单个文档
+await context.openFileByPath('C:/docs/note.md');
+
+// 打开后可以继续读取内容
+const content = context.getEditorValue();
+context.ui.notice('已打开文档，长度：' + content.length, 'ok');
+```
+
+**注意：**
+- 仅支持当前 flyMD 支持的文档类型（`md / markdown / txt / pdf`）。
+- 同样走应用内部的打开流程，会更新当前文档路径、最近文件等状态。
+
+### context.exportCurrentToPdf
+
+将当前文档导出为 PDF 文件，目标路径由插件指定。
+
+```javascript
+// 将当前文档导出到指定路径
+await context.exportCurrentToPdf('C:/docs/note.pdf');
+context.ui.notice('PDF 导出完成', 'ok');
+```
+
+**注意：**
+- 仅在桌面版（Tauri 应用）可用，依赖内置的 PDF 导出能力。
+- `target` 应为完整文件路径（包含 `.pdf` 扩展名），若路径无效会抛出错误。
+- 插件无需关心渲染细节，导出内容与应用中“另存为 PDF”的效果一致。
+
 ## 主题扩展（Theme）
 
 flyMD 内置了主题系统，并对外暴露了可选的 Theme 扩展 API，便于插件对“颜色调色板、排版风格、Markdown 渲染风格”进行扩展或覆写。

@@ -99,6 +99,8 @@ function ensureCss() {
     '.set-row{display:flex;align-items:center;gap:10px;margin:8px 0}',
     '.set-row label{width:110px;color:#334155}',
     '.set-row input{flex:1;background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:8px;padding:8px 10px}',
+    '.set-row select{flex:0 0 100px;max-width:100px;background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:8px;padding:8px 10px}',
+    '.set-row.set-link-row a{font-size:10px}',
     '#ai-set-actions{display:flex;gap:10px;justify-content:flex-end;padding:10px 12px;border-top:1px solid #e5e7eb;background:#fafafa}',
     '#ai-set-actions button{padding:8px 12px;border-radius:10px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a}',
     '#ai-set-actions button.primary{background:#2563eb;border-color:#2563eb;color:#fff}',
@@ -726,11 +728,12 @@ export async function openSettings(context){
     '<div id="ai-set-dialog">',
     ' <div id="ai-set-head"><div id="ai-set-title">AI 设置</div><button id="ai-set-close" title="关闭">×</button></div>',
     ' <div id="ai-set-body">',
-    '  <div class="set-row"><label>Base URL</label><input id="set-base" type="text" placeholder="https://api.openai.com/v1"/></div>',
+    '  <div class="set-row"><label>Base URL</label><select id="set-base-select"><option value="https://api.openai.com/v1">OpenAI</option><option value="https://api.siliconflow.cn/v1">硅基流动</option><option value="custom">自定义</option></select><input id="set-base" type="text" placeholder="https://api.openai.com/v1"/></div>',
     '  <div class="set-row"><label>API Key</label><input id="set-key" type="password" placeholder="sk-..."/></div>',
     '  <div class="set-row"><label>模型</label><input id="set-model" type="text" placeholder="gpt-4o-mini"/></div>',
     '  <div class="set-row"><label>侧栏宽度(px)</label><input id="set-sidew" type="number" min="240" step="10" placeholder="300"/></div>',
     '  <div class="set-row"><label>上下文截断</label><input id="set-max" type="number" min="1000" step="500" placeholder="6000"/></div>',
+    '  <div class="set-row set-link-row"><a href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer">点此注册硅基流动得2000万免费Token</a></div>',
     ' </div>',
     ' <div id="ai-set-actions"><button id="ai-set-cancel">取消</button><button class="primary" id="ai-set-ok">保存</button></div>',
     '</div>'
@@ -743,6 +746,7 @@ export async function openSettings(context){
   }
   // 赋初值
   const elBase = overlay.querySelector('#set-base')
+  const elBaseSel = overlay.querySelector('#set-base-select')
   const elKey = overlay.querySelector('#set-key')
   const elModel = overlay.querySelector('#set-model')
   const elMax = overlay.querySelector('#set-max')
@@ -752,6 +756,16 @@ export async function openSettings(context){
   elModel.value = cfg.model || 'gpt-4o-mini'
   elMax.value = String((cfg.limits?.maxCtxChars) || 6000)
   elSideW.value = String((cfg.win?.w) || 300)
+  if (elBaseSel) {
+    const cur = String(cfg.baseUrl || '').trim()
+    if (cur === 'https://api.siliconflow.cn/v1') elBaseSel.value = 'https://api.siliconflow.cn/v1'
+    else if (!cur || cur === 'https://api.openai.com/v1') elBaseSel.value = 'https://api.openai.com/v1'
+    else elBaseSel.value = 'custom'
+    elBaseSel.addEventListener('change', () => {
+      const val = elBaseSel.value
+      if (val && val !== 'custom') elBase.value = val
+    })
+  }
   // 交互
   const close = () => { try { overlay.remove() } catch {} }
   overlay.querySelector('#ai-set-close')?.addEventListener('click', close)

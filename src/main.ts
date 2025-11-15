@@ -7721,6 +7721,24 @@ async function updateInstalledPlugin(p: InstalledPlugin, info: PluginUpdateState
   return rec
 }
 
+// 创建扩展市场加载指示器
+function createLoadingIndicator(): HTMLElement {
+  const container = document.createElement('div')
+  container.className = 'ext-loading'
+
+  const spinner = document.createElement('div')
+  spinner.className = 'ext-loading-spinner'
+
+  const text = document.createElement('div')
+  text.className = 'ext-loading-text'
+  text.textContent = t('ext.market.loading')
+
+  container.appendChild(spinner)
+  container.appendChild(text)
+
+  return container
+}
+
 async function refreshExtensionsUI(): Promise<void> {
   if (!_extListHost) return
   const host = _extListHost
@@ -7763,7 +7781,8 @@ async function refreshExtensionsUI(): Promise<void> {
   const list3 = document.createElement('div'); list3.className = 'ext-list'
   st3wrap.appendChild(list3)
   host.appendChild(st3wrap)
-  list3.textContent = t('ext.market.loading')
+  list3.innerHTML = ''
+  list3.appendChild(createLoadingIndicator())
 
   // 2) 填充 Builtins（仅依赖本地 Store，不走网络）
   for (const b of builtinPlugins) {
@@ -7896,11 +7915,12 @@ async function refreshExtensionsUI(): Promise<void> {
     }
   }
 
-  // 5) 填充“可安装的扩展”区块（扩展市场）
+  // 5) 填充"可安装的扩展"区块（扩展市场）
   try {
     const items = marketItems
     if (!items || items.length === 0) {
-      list3.textContent = t('ext.market.loading')
+      list3.innerHTML = ''
+      list3.appendChild(createLoadingIndicator())
       return
     }
     list3.textContent = ''
@@ -7965,7 +7985,8 @@ async function refreshExtensionsUI(): Promise<void> {
       list3.appendChild(row)
     }
   } catch {
-    list3.textContent = t('ext.market.loading')
+    list3.innerHTML = ''
+    list3.appendChild(createLoadingIndicator())
   }
 }
 

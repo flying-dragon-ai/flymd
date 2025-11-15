@@ -12,6 +12,10 @@ import './imePatch'
   - 拖放文件打开
 */
 
+// 性能标记：应用启动
+performance.mark('flymd-app-start')
+const _startTime = performance.now()
+
 import './style.css'
 import './mobile.css'  // 移动端样式
 import { initThemeUI, applySavedTheme } from './theme'
@@ -43,7 +47,7 @@ import appIconUrl from '../Flymdnew.png?url'
 import goodImgUrl from '../good.png?url'
 import { decorateCodeBlocks } from './decorate'
 import pkg from '../package.json'
-import { htmlToMarkdown } from './html2md'
+// htmlToMarkdown 改为按需动态导入（仅在粘贴 HTML 时使用）
 import { initWebdavSync, openWebdavSyncDialog, getWebdavSyncConfig, syncNow as webdavSyncNow } from './extensions/webdavSync'
 // 平台适配层（Android 支持）
 import { initPlatformIntegration, mobileSaveFile, isMobilePlatform } from './platform-integration'
@@ -981,6 +985,9 @@ app.innerHTML = `
   </div>
 `
 try { logInfo('打点:DOM就绪') } catch {}
+
+// 性能标记：DOM 就绪
+performance.mark('flymd-dom-ready')
 
 // 初始化平台适配（Android 支持）
 initPlatformIntegration().catch((e) => console.error('[Platform] Initialization failed:', e))
@@ -6468,14 +6475,19 @@ function bindEvents() {
               safe = sanitizeHtml!(html)
             } catch {}
 
-            // 转成 Markdown 文本
-            const mdText = htmlToMarkdown(safe, { baseUrl })
+            // 转成 Markdown 文本（动态导入）
+            try {
+              const { htmlToMarkdown } = await import('./html2md')
+              const mdText = htmlToMarkdown(safe, { baseUrl })
               if (mdText && mdText.trim()) {
                 e.preventDefault()
                 insertAtCursor(mdText)
                 if (mode === 'preview') await renderPreview();
                 return
               }
+            } catch (err) {
+              console.warn('HTML to Markdown conversion failed:', err)
+            }
           }
         }
       } catch {}
@@ -6945,11 +6957,31 @@ function bindEvents() {
     // 依据当前语言，应用一次 UI 文案（含英文简写，避免侧栏溢出）
     try { applyI18nUi() } catch {}
     try { logInfo('打点:事件绑定完成') } catch {}
-    // 扩展：初始化目录并激活已启用扩展（此时 Store 已就绪）
-    try { await ensurePluginsDir(); await loadAndActivateEnabledPlugins() } catch {}
-    try { await initWebdavSync() } catch {}
-    // 绑定扩展按钮
+
+    // 性能标记：首次渲染完成
+    performance.mark('flymd-first-render')
+
+    // 绑定扩展按钮（立即绑定，但延迟加载扩展）
     try { const btnExt = document.getElementById('btn-extensions'); if (btnExt) btnExt.addEventListener('click', () => { void showExtensionsOverlay(true) }) } catch {}
+
+    // 延迟初始化扩展系统和 WebDAV（使用 requestIdleCallback）
+    const ric: any = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 100))
+    ric(async () => {
+      try {
+        // 扩展：初始化目录并激活已启用扩展（此时 Store 已就绪）
+        await ensurePluginsDir()
+        await loadAndActivateEnabledPlugins()
+      } catch (e) {
+        console.warn('[Extensions] 延迟初始化失败:', e)
+      }
+    })
+    ric(async () => {
+      try {
+        await initWebdavSync()
+      } catch (e) {
+        console.warn('[WebDAV] 延迟初始化失败:', e)
+      }
+    })
     // 开启 DevTools 快捷键（生产/开发环境均可）
     try {
       document.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -7004,10 +7036,35 @@ function bindEvents() {
         } catch {}
       })
     } catch {}
+    // 性能标记：应用就绪
+    performance.mark('flymd-app-ready')
+
+    // 计算并输出启动性能
+    try {
+      const appStart = performance.getEntriesByName('flymd-app-start')[0]?.startTime || 0
+      const domReady = performance.getEntriesByName('flymd-dom-ready')[0]?.startTime || 0
+      const firstRender = performance.getEntriesByName('flymd-first-render')[0]?.startTime || 0
+      const appReady = performance.getEntriesByName('flymd-app-ready')[0]?.startTime || 0
+      console.log('[启动性能]', {
+        'DOM就绪': `${(domReady - appStart).toFixed(0)}ms`,
+        '首次渲染': `${(firstRender - appStart).toFixed(0)}ms`,
+        '应用就绪': `${(appReady - appStart).toFixed(0)}ms`,
+        '总耗时': `${(appReady - appStart).toFixed(0)}ms`
+      })
+    } catch {}
+
     console.log('应用初始化完成')
     void logInfo('flyMD (飞速MarkDown) 应用初始化完成')
-    // 启动后 5 秒进行一次静默检查，仅加红点提示
-    checkUpdateSilentOnceAfterStartup()
+
+    // 延迟更新检查到空闲时间（原本是 5 秒后）
+    const ricUpdate: any = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 5000))
+    ricUpdate(() => {
+      try {
+        checkUpdateSilentOnceAfterStartup()
+      } catch (e) {
+        console.warn('[Update] 延迟检查失败:', e)
+      }
+    })
   } catch (error) {
     console.error('应用启动失败:', error)
     showError('应用启动失败', error)

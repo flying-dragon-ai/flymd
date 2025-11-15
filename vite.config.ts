@@ -68,10 +68,26 @@ export default defineConfig(({ mode }) => ({
             if (id.includes('mermaid')) return 'mermaid'
             if (id.includes('katex')) return 'katex'
             if (id.includes('pdfjs-dist')) return 'pdfjs'
+            // 导出相关库（按需加载）
+            if (id.includes('html2pdf') || id.includes('html-docx') || id.includes('html-to-docx')) return 'docx'
+            if (id.includes('canvg')) return 'pdf'
+            // WebDAV 相关
+            if (id.includes('webdav')) return 'wps'
             // Tauri 运行时
             if (id.includes('@tauri-apps')) return 'tauri'
             // 其他较小的第三方库打包到一起
             return 'vendor'
+          }
+          // 应用代码分割：将大型模块分离
+          if (id.includes('/src/')) {
+            // WYSIWYG 相关代码
+            if (id.includes('/wysiwyg/')) return 'wysiwyg'
+            // 扩展系统
+            if (id.includes('/extensions/')) return 'extensions'
+            // 文件树
+            if (id.includes('/fileTree')) return 'filetree'
+            // HTML 转 Markdown
+            if (id.includes('/html2md')) return 'html2md'
           }
         },
         // 优化文件名，启用内容哈希以利用浏览器缓存

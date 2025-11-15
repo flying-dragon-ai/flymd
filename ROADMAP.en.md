@@ -2,6 +2,11 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.3.0
+- Improved Enhance window styles, add animation effects, and theme backgrounds
+
+
+
 ## Update v0.2.9
 - Added Exposed `pickDocFiles`, `openFileByPath`, and `exportCurrentToPdf` interfaces for extensions to enrich their functionalities.
 - Improved Added a fallback address to the extension marketplace to provide services for regions with GitHub connectivity issues.

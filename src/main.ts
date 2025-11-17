@@ -1765,8 +1765,8 @@ if (menubar) {
   const libBtn = document.createElement('div')
   libBtn.id = 'btn-library'
   libBtn.className = 'menu-item'
-  libBtn.title = t('lib.choose')
-  libBtn.textContent = t('lib.choose')
+  libBtn.title = t('lib.menu')
+  libBtn.textContent = t('lib.menu')
   // 将“库”按钮插入到“打开”按钮左侧（若获取不到则放到最左）
   const openBtnRef = document.getElementById('btn-open') as HTMLDivElement | null
   if (openBtnRef && openBtnRef.parentElement === menubar) {
@@ -5315,7 +5315,7 @@ function applyI18nUi() {
       ['btn-recent', t('menu.recent')],
       ['btn-uploader', t('menu.uploader')],
       ['btn-extensions', t('menu.extensions')],
-      ['btn-library', t('lib.choose')],
+      ['btn-library', t('lib.menu')],
       ['btn-update', t('menu.update')],
       ['btn-about', t('menu.about')],
     ]

@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.3.5
+- Added: In Edit mode, pasting a URL with `Ctrl+V` now fetches the page `<title>` and expands it into a `[page title](https://...)` Markdown link, while `Ctrl+Shift+V` always pastes plain text.
+- Fixed: When pasting from HTML sources, the editor no longer inserts both raw text and converted Markdown; `Ctrl+V` now only keeps the converted Markdown content.
+- Added: In Reading mode, holding `Shift` and scrolling the mouse wheel adjusts the reading width, making long-form reading more comfortable.
+- Added: Extension update indicators have been added to the notification area in the main window so you can spot available plugin updates at a glance.
+- Improved: The AI assistant extension now supports docking on the right side with drag-to-snap behavior, along with several interaction and UX refinements.
+
 ## Update v0.3.4
 - Improved: Optimized WebDAV sync strategy with new sync options and more robust handling when documents are deleted, moved, or renamed.
 - Added: Custom library icons support, along with refreshed folder/library icon styles.

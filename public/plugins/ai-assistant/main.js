@@ -891,9 +891,18 @@ async function generateTodosAndPush(context) {
     context.setEditorValue(GENERATING_MARKER + content)
     context.ui.notice('正在分析文章生成待办事项并创建提醒...', 'ok', 999999)
 
-    // 构造提示词
+    // 构造提示词 - 添加当前时间上下文
+    const now = new Date()
+    const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    const weekday = weekdays[now.getDay()]
+    const timeContext = `今天是 ${currentDate} ${weekday} ${currentTime}`
+
     const system = '你是专业的任务管理助手。基于用户提供的文章内容，提取其中的可执行任务，并生成待办事项列表。'
-    const prompt = `请仔细阅读以下文章内容，提取其中提到的或隐含的可执行任务，生成待办事项列表。
+    const prompt = `${timeContext}
+
+请仔细阅读以下文章内容，提取其中提到的或隐含的可执行任务，生成待办事项列表。
 
 文章内容：
 ${content.length > 4000 ? content.slice(0, 4000) + '...' : content}
@@ -902,16 +911,16 @@ ${content.length > 4000 ? content.slice(0, 4000) + '...' : content}
 1. 每个待办事项必须是明确的、可执行的任务
 2. 格式严格遵守：- [ ] 任务描述 @时间
 3. 时间格式使用以下之一：
-   - @YYYY-MM-DD HH:mm （如 @2025-01-21 14:00）
+   - @YYYY-MM-DD HH:mm （如 @${currentDate} 14:00）
    - @明天 14:00
    - @后天 上午
    - @今天 晚上8点
-4. 根据任务的紧急程度和文章内容合理安排时间
+4. 根据任务的紧急程度和文章内容合理安排时间，使用今天日期 ${currentDate} 作为基准
 5. 只输出待办事项列表，每行一个，不要其他说明文字
 6. 如果文章中没有明确的任务，可以根据文章主题提取3-5个相关的行动项
 
 示例输出：
-- [ ] 完成项目文档撰写 @2025-01-22 10:00
+- [ ] 完成项目文档撰写 @${currentDate} 10:00
 - [ ] 审阅代码并提交反馈 @明天 下午3点
 - [ ] 整理会议纪要 @今天 晚上`
 
@@ -1029,9 +1038,18 @@ async function generateTodos(context){
     context.setEditorValue(GENERATING_MARKER + content)
     context.ui.notice('正在分析文章生成待办事项...', 'ok', 999999)
 
-    // 构造提示词
+    // 构造提示词 - 添加当前时间上下文
+    const now = new Date()
+    const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+    const currentDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    const weekday = weekdays[now.getDay()]
+    const timeContext = `今天是 ${currentDate} ${weekday} ${currentTime}`
+
     const system = '你是专业的任务管理助手。基于用户提供的文章内容，提取其中的可执行任务，并生成待办事项列表。'
-    const prompt = `请仔细阅读以下文章内容，提取其中提到的或隐含的可执行任务，生成待办事项列表。
+    const prompt = `${timeContext}
+
+请仔细阅读以下文章内容，提取其中提到的或隐含的可执行任务，生成待办事项列表。
 
 文章内容：
 ${content.length > 4000 ? content.slice(0, 4000) + '...' : content}
@@ -1040,16 +1058,16 @@ ${content.length > 4000 ? content.slice(0, 4000) + '...' : content}
 1. 每个待办事项必须是明确的、可执行的任务
 2. 格式严格遵守：- [ ] 任务描述 @时间
 3. 时间格式使用以下之一：
-   - @YYYY-MM-DD HH:mm （如 @2025-01-21 14:00）
+   - @YYYY-MM-DD HH:mm （如 @${currentDate} 14:00）
    - @明天 14:00
    - @后天 上午
    - @今天 晚上8点
-4. 根据任务的紧急程度和文章内容合理安排时间
+4. 根据任务的紧急程度和文章内容合理安排时间，使用今天日期 ${currentDate} 作为基准
 5. 只输出待办事项列表，每行一个，不要其他说明文字
 6. 如果文章中没有明确的任务，可以根据文章主题提取3-5个相关的行动项
 
 示例输出：
-- [ ] 完成项目文档撰写 @2025-01-22 10:00
+- [ ] 完成项目文档撰写 @${currentDate} 10:00
 - [ ] 审阅代码并提交反馈 @明天 下午3点
 - [ ] 整理会议纪要 @今天 晚上`
 

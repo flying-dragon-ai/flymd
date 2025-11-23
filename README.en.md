@@ -187,6 +187,8 @@ Issues and Pull Requests are welcome!
 ## ❓ FAQ
 
 - [Solution for Arch Linux blank screen](arch.md)
+- Right-click menu taken over by a plugin? Press `Shift + Right Click` to open the native context menu.
+- Need larger content or different margins? Use `Shift + Mouse Wheel` to adjust the content width (margins), and `Ctrl + Mouse Wheel` to enlarge text and images.
 
 ## Open Source Support
 

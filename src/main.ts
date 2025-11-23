@@ -4448,6 +4448,26 @@ async function openFile2(preset?: unknown) {
     
     // 打开后默认进入预览模式
     await switchToPreviewAfterOpen()
+
+    // 检查是否默认启用所见模式
+    try {
+      const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
+      const wysiwygDefault = localStorage.getItem(WYSIWYG_DEFAULT_KEY) === 'true'
+      if (wysiwygDefault && !wysiwyg) {
+        // 延迟一小段时间，确保预览已渲染
+        setTimeout(async () => {
+          try {
+            await setWysiwygEnabled(true)
+            console.log('[WYSIWYG] 打开文档后默认启用所见模式')
+          } catch (e) {
+            console.error('[WYSIWYG] 打开文档后启用所见模式失败:', e)
+          }
+        }, 100)
+      }
+    } catch (e) {
+      console.error('[WYSIWYG] 检查默认所见模式设置失败:', e)
+    }
+
     // 恢复上次阅读/编辑位置（编辑器光标/滚动与预览滚动）
     await restoreDocPosIfAny(selectedPath)
     await pushRecent(currentFilePath)
@@ -8510,6 +8530,25 @@ function bindEvents() {
 
     console.log('应用初始化完成')
     void logInfo('flyMD (飞速MarkDown) 应用初始化完成')
+
+    // 检查是否默认启用所见模式
+    try {
+      const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
+      const wysiwygDefault = localStorage.getItem(WYSIWYG_DEFAULT_KEY) === 'true'
+      if (wysiwygDefault && !wysiwyg && currentFilePath) {
+        // 延迟一小段时间，确保编辑器已完全初始化
+        setTimeout(async () => {
+          try {
+            await setWysiwygEnabled(true)
+            console.log('[WYSIWYG] 默认启用所见模式')
+          } catch (e) {
+            console.error('[WYSIWYG] 默认启用所见模式失败:', e)
+          }
+        }, 200)
+      }
+    } catch (e) {
+      console.error('[WYSIWYG] 检查默认所见模式设置失败:', e)
+    }
 
     // 延迟更新检查到空闲时间（原本是 5 秒后）
     const ricUpdate: any = (window as any).requestIdleCallback || ((cb: any) => setTimeout(cb, 5000))

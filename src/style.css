@@ -1640,6 +1640,7 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .theme-focus-row {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .theme-toggle-label {
@@ -1649,6 +1650,34 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   cursor: pointer;
   user-select: none;
   width: 100%;
+}
+
+.theme-toggle-label.theme-toggle-half {
+  width: calc(50% - 4px);
+  gap: 8px;
+}
+
+.theme-toggle-label.theme-toggle-half .theme-toggle-text {
+  font-size: 13px;
+}
+
+.theme-toggle-label.theme-toggle-boxed {
+  background: rgba(127, 127, 127, 0.05);
+  border: 1px solid rgba(127, 127, 127, 0.15);
+  border-radius: 8px;
+  padding: 10px 12px;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle-label.theme-toggle-boxed:hover {
+  background: rgba(127, 127, 127, 0.08);
+  border-color: rgba(127, 127, 127, 0.25);
+}
+
+.theme-toggle-label.theme-toggle-half .theme-toggle-shortcut {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-left: 4px;
 }
 
 .theme-toggle-text {

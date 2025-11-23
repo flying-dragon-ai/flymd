@@ -223,13 +223,19 @@ function createPanel(): HTMLDivElement {
   panel.innerHTML = `
     <div class="theme-section theme-focus-section">
       <div class="theme-focus-row">
-        <label class="theme-toggle-label" for="focus-mode-toggle">
-          <span class="theme-toggle-text">专注模式</span>
+        <label class="theme-toggle-label theme-toggle-half theme-toggle-boxed" for="focus-mode-toggle">
+          <span class="theme-toggle-text">专注模式 <span class="theme-toggle-shortcut">Ctrl+Shift+F</span></span>
           <div class="theme-toggle-switch">
             <input type="checkbox" id="focus-mode-toggle" class="theme-toggle-input" />
             <span class="theme-toggle-slider"></span>
           </div>
-          <span class="theme-toggle-shortcut">Ctrl+Shift+F</span>
+        </label>
+        <label class="theme-toggle-label theme-toggle-half theme-toggle-boxed" for="wysiwyg-default-toggle">
+          <span class="theme-toggle-text">默认使用所见模式</span>
+          <div class="theme-toggle-switch">
+            <input type="checkbox" id="wysiwyg-default-toggle" class="theme-toggle-input" />
+            <span class="theme-toggle-slider"></span>
+          </div>
         </label>
       </div>
     </div>
@@ -656,6 +662,33 @@ export function initThemeUI(): void {
         }
       })
       observer.observe(document.body, { attributes: true, attributeFilter: ['class'] })
+    }
+
+    // 默认使用所见模式开关
+    const wysiwygDefaultToggle = panel.querySelector('#wysiwyg-default-toggle') as HTMLInputElement | null
+    if (wysiwygDefaultToggle) {
+      // 从 localStorage 读取设置
+      const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
+      const getWysiwygDefault = (): boolean => {
+        try {
+          const v = localStorage.getItem(WYSIWYG_DEFAULT_KEY)
+          return v === 'true'
+        } catch { return false }
+      }
+      const setWysiwygDefault = (enabled: boolean) => {
+        try {
+          localStorage.setItem(WYSIWYG_DEFAULT_KEY, enabled ? 'true' : 'false')
+          // 触发事件，通知 main.ts
+          const ev = new CustomEvent('flymd:wysiwyg:default', { detail: { enabled } })
+          window.dispatchEvent(ev)
+        } catch {}
+      }
+      // 初始化开关状态
+      wysiwygDefaultToggle.checked = getWysiwygDefault()
+      // 监听开关变化
+      wysiwygDefaultToggle.addEventListener('change', () => {
+        setWysiwygDefault(wysiwygDefaultToggle.checked)
+      })
     }
 
     // 主题按钮：切换面板显隐

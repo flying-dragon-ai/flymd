@@ -829,6 +829,7 @@ function startFilenameObserver(context){
             __AI_LAST_DOC_HASH__ = hash
             await ensureSessionForDoc(context)
             await updateWindowTitle(context)
+            await refreshSessionSelect(context) // 刷新会话下拉框
             const chat = el('ai-chat')
             if (chat) renderMsgs(chat)
           } else {

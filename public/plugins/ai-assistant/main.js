@@ -175,8 +175,11 @@ function ensureCss() {
     '#ai-selects select,#ai-selects input{background:#fff;border:1px solid #e5e7eb;color:#0f172a;border-radius:8px;padding:6px 8px}',
     '#ai-selects{display:flex;flex-wrap:wrap;align-items:center;gap:8px;flex:1;min-width:220px}',
     '.ai-session-picker{display:flex;flex-wrap:wrap;align-items:center;gap:6px;justify-content:flex-end}',
+    '.ai-session-label{font-size:15px;font-weight:600;color:#0f172a}',
     '#ai-toolbar .btn{padding:7px 12px;border-radius:8px;border:1px solid #d1d5db;background:#ffffff;color:#0f172a;display:inline-flex;align-items:center;justify-content:center;font-weight:500;gap:4px;min-height:34px}',
     '#ai-toolbar .btn:hover{background:#f3f4f6}',
+    '#ai-toolbar .btn.session-btn{padding:0;border:none;background:none;color:#64748b;font-size:14px;cursor:pointer;text-decoration:none;transition:color .2s;width:auto;min-height:auto}',
+    '#ai-toolbar .btn.session-btn:hover{color:#0f172a;text-decoration:underline;background:none}',
     '#ai-toolbar .btn.action{padding:0;border:none;background:none;color:#64748b;font-size:14px;cursor:pointer;text-decoration:none;transition:color .2s;width:auto;min-height:auto}',
     '#ai-toolbar .btn.action:hover{color:#0f172a;text-decoration:underline;background:none}',
     '.small{font-size:12px;opacity:.85}',
@@ -217,7 +220,10 @@ function ensureCss() {
     '#ai-assist-win.dark #ai-input textarea:focus{border-color:#3b82f6}',
     '#ai-assist-win.dark #ai-send{color:#60a5fa}',
     '#ai-assist-win.dark #ai-send:hover{color:#93c5fd}',
+    '#ai-assist-win.dark .ai-session-label{color:#e5e7eb}',
     '#ai-assist-win.dark #ai-toolbar .btn{background:#111827;color:#e5e7eb;border:1px solid #1f2937}',
+    '#ai-assist-win.dark #ai-toolbar .btn.session-btn{background:none;color:#9ca3af;border:none}',
+    '#ai-assist-win.dark #ai-toolbar .btn.session-btn:hover{background:none;color:#e5e7eb}',
     '#ai-assist-win.dark #ai-toolbar .btn.action{background:none;color:#9ca3af;border:none}',
     '#ai-assist-win.dark #ai-toolbar .btn.action:hover{background:none;color:#e5e7eb}',
     '#ai-assist-win.dark #ai-toolbar select,#ai-assist-win.dark #ai-toolbar input{background:#0b1220;border:1px solid #1f2937;color:#e5e7eb}',
@@ -610,7 +616,7 @@ async function updateWindowTitle(context) {
     const head = DOC().getElementById('ai-title')
     if (!head) return
     await ensureSessionForDoc(context)
-    head.textContent = `AI 写作助手 · ${__AI_SESSION__.docTitle || '未命名'}`
+    head.textContent = __AI_SESSION__.docTitle || '未命名'
   } catch {}
 }
 
@@ -779,10 +785,10 @@ async function mountWindow(context){
     '    <label id="ai-model-label">模型</label> <input id="ai-model" placeholder="如 gpt-4o-mini" style="width:160px"/><a id="ai-model-powered" href="https://cloud.siliconflow.cn/i/X96CT74a" target="_blank" rel="noopener noreferrer" style="display:none;border:none;outline:none;"><img id="ai-model-powered-img" src="" alt="Powered by" style="height:20px;width:auto;border:none;outline:none;vertical-align:middle;"/></a><span id="ai-free-model-label" style="display:none;margin:0 4px 0 12px;">模型：</span><select id="ai-free-model" title="选择免费模型" style="display:none;margin-left:0;"><option value="qwen">Qwen</option><option value="glm">GLM</option></select>',
     '   </div>',
     '   <div class="ai-toolbar-controls">',
-    '    <div class="ai-session-picker"><label class="small" for="ai-sel-session">会话</label><select id="ai-sel-session" style="max-width:180px"></select></div>',
-    '    <button class="btn" id="ai-s-new" title="新建会话">新建</button>',
-    '    <button class="btn" id="ai-s-del" title="删除当前会话">删除</button>',
-    '    <button class="btn" id="ai-dock-toggle" title="在侧栏/浮窗之间切换">浮动</button>',
+    '    <div class="ai-session-picker"><label class="ai-session-label" for="ai-sel-session">会话</label><select id="ai-sel-session" style="max-width:180px"></select></div>',
+    '    <button class="btn session-btn" id="ai-s-new" title="新建会话">新建</button>',
+    '    <button class="btn session-btn" id="ai-s-del" title="删除当前会话">删除</button>',
+    '    <button class="btn session-btn" id="ai-dock-toggle" title="在侧栏/浮窗之间切换">浮动</button>',
     '   </div>',
     '  </div>',
     '  <div class="ai-toolbar-row ai-toolbar-actions">',
@@ -791,6 +797,7 @@ async function mountWindow(context){
     '    <button class="btn action" id="q-proof">纠错</button>',
     '    <button class="btn action" id="q-outline">提纲</button>',
     '    <button class="btn action" id="q-todos" title="分析文章生成待办事项">待办</button>',
+    '    <button class="btn action" id="q-todos-remind" title="分析文章生成待办并创建提醒">提醒</button>',
     '    <button class="btn action" id="ai-clear" title="清空本篇会话">清空</button>',
     '  </div>',
     ' </div>',
@@ -841,6 +848,7 @@ async function mountWindow(context){
   el.querySelector('#q-proof').addEventListener('click',()=>{ quick(context,'纠错') })
   el.querySelector('#q-outline').addEventListener('click',()=>{ quick(context,'提纲') })
   el.querySelector('#q-todos').addEventListener('click',()=>{ generateTodos(context) })
+  el.querySelector('#q-todos-remind').addEventListener('click',()=>{ generateTodosAndPush(context) })
   el.__mounted = true
   // 头部双击：大小切换（小↔大）
   try {

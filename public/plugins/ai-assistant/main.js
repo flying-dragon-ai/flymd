@@ -69,6 +69,29 @@ function clampCtx(s, n) { const t = String(s || ''); return t.length > n ? t.sli
 // 最小宽度常量
 const MIN_WIDTH = 400
 
+// 避免固定字符串被滥用
+const FLYMD_TOKEN_SECRET = 'flymd-rolling-secret-v1' // 与后端 ai_proxy.php 保持一致
+const FLYMD_TOKEN_WINDOW_MS = 120000 // 2 分钟一个窗口
+
+function fnv1aHex(str){
+  let hash = 0x811c9dc5
+  const prime = 0x01000193
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i)
+    hash = Math.imul(hash, prime)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+function buildRollingClientToken(now = Date.now()){
+  if (!FLYMD_TOKEN_SECRET) return 'flymd-client-legacy'
+  const slice = Math.floor(now / FLYMD_TOKEN_WINDOW_MS)
+  const base = `${FLYMD_TOKEN_SECRET}:${slice}:2pai`
+  const partA = fnv1aHex(base)
+  const partB = fnv1aHex(base + ':' + (slice % 97))
+  return `flymd-${partA}${partB}`
+}
+
 function DOC(){ return (window.__AI_DOC__ || document) }
 function WIN(){ return (window.__AI_WIN__ || window) }
 function el(id) { return DOC().getElementById(id) }
@@ -99,7 +122,7 @@ function buildApiHeaders(cfg){
     // 免费代理模式：由后端持有真实 Key，这里不再下发
     if (!isFreeProvider(cfg) && cfg && cfg.apiKey) headers.Authorization = 'Bearer ' + cfg.apiKey
     // 为免费代理模式增加一个简单令牌，提高滥用成本（仅飞速MarkDown客户端约定使用）
-    if (isFreeProvider(cfg)) headers['X-Flymd-Token'] = 'flymd-client-2025-11-some-long-random'
+    if (isFreeProvider(cfg)) headers['X-Flymd-Token'] = buildRollingClientToken()
     return headers
   }
 

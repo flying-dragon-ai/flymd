@@ -3199,8 +3199,8 @@ function refreshTitle() {
   document.title = label
   const osTitle = `${label} - 飞速MarkDown`
   try { void getCurrentWindow().setTitle(osTitle).catch(() => {}) } catch {}
-  // 编辑模式内容变化时尝试刷新大纲
-  try { scheduleOutlineUpdateFromSource() } catch {}
+  // 内容变化时刷新大纲（包括所见模式）
+  try { scheduleOutlineUpdate() } catch {}
 }
 
 // 更新状态栏（行列字）
@@ -7945,7 +7945,23 @@ function bindEvents() {
           const id = t.getAttribute('data-copy-target')
           if (id) { pre = document.querySelector(`pre[data-code-copy-id="${id}"]`) as HTMLElement | null }
         }
-        text = pre ? (pre.textContent || '') : ''
+        if (pre) {
+          // 提取语言信息并构造 Markdown 格式
+          const codeEl = pre.querySelector('code') as HTMLElement | null
+          const raw = codeEl ? (codeEl.textContent || '') : (pre.textContent || '')
+          let lang = ''
+          if (codeEl) {
+            const codeClasses = codeEl.className || ''
+            const preClasses = pre.className || ''
+            const langMatch = (codeClasses + ' ' + preClasses).match(/language-(\w+)/)
+            if (langMatch && langMatch[1]) {
+              lang = langMatch[1]
+            }
+          }
+          text = lang ? ('```' + lang + '\n' + raw + '\n```') : ('```\n' + raw + '\n```')
+        } else {
+          text = ''
+        }
       }
       text = text || ''
       let ok = false
@@ -8042,8 +8058,8 @@ function bindEvents() {
       setTimeout(() => updateFocusSidebarBg(), 100);
       return
     }
-    if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); guard(formatBold)(); if (mode === 'preview') void renderPreview(); else if (wysiwyg) scheduleWysiwygRender(); return }
-    if (e.ctrlKey && e.key.toLowerCase() === 'i') { e.preventDefault(); guard(formatItalic)(); if (mode === 'preview') void renderPreview(); else if (wysiwyg) scheduleWysiwygRender(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); await formatBold(); if (mode === 'preview') void renderPreview(); else if (wysiwyg) scheduleWysiwygRender(); return }
+    if (e.ctrlKey && e.key.toLowerCase() === 'i') { e.preventDefault(); await formatItalic(); if (mode === 'preview') void renderPreview(); else if (wysiwyg) scheduleWysiwygRender(); return }
     // 专注模式快捷键 Ctrl+Shift+F
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); await toggleFocusMode(); return }
     // 文件操作快捷键

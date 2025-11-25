@@ -649,7 +649,22 @@ function getCodeCopyText(pre: HTMLElement): string | null {
   if (!codeEl) return null
   const raw = codeEl.textContent || ''
   if (!raw.trim()) return null
-  return raw
+
+  // 提取语言信息并构造 Markdown 格式
+  let lang = ''
+  const codeClasses = codeEl.className || ''
+  const preClasses = pre.className || ''
+  const langMatch = (codeClasses + ' ' + preClasses).match(/language-(\w+)/)
+  if (langMatch && langMatch[1]) {
+    lang = langMatch[1]
+  }
+
+  // 返回 Markdown 格式的代码块
+  if (lang) {
+    return '```' + lang + '\n' + raw + '\n```'
+  } else {
+    return '```\n' + raw + '\n```'
+  }
 }
 
 function positionCodeCopyWrap(pre: HTMLElement, wrap: HTMLDivElement, rootRc: DOMRect) {

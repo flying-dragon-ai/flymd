@@ -4725,3 +4725,197 @@ body.focus-mode.custom-titlebar-active .container {
 body.focus-mode.custom-titlebar-active .focus-trigger-zone {
   display: none !important;
 }
+
+/* ========================================
+   多标签栏样式
+   ======================================== */
+
+.tabbar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 0 4px;
+  user-select: none;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.tabbar-tabs {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+  gap: 2px;
+  /* 隐藏滚动条但保持滚动功能 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tabbar-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabbar-tab {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 180px;
+  min-width: 80px;
+  position: relative;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tabbar-tab:hover {
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+.tabbar-tab.active {
+  background: var(--panel-bg);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* 活跃标签底部指示线 */
+.tabbar-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: #3b82f6;
+  border-radius: 2px 2px 0 0;
+}
+
+.tabbar-tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.tabbar-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+/* 未保存标记 */
+.tabbar-tab-dirty {
+  color: #f59e0b;
+  font-size: 8px;
+  flex-shrink: 0;
+  margin-left: -2px;
+}
+
+/* 关闭按钮 */
+.tabbar-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.tabbar-tab:hover .tabbar-tab-close,
+.tabbar-tab.active .tabbar-tab-close {
+  opacity: 0.6;
+}
+
+.tabbar-tab-close:hover {
+  opacity: 1 !important;
+  background: rgba(127, 127, 127, 0.2);
+}
+
+/* 有未保存内容时，始终显示 dirty 标记代替关闭按钮 */
+.tabbar-tab.dirty .tabbar-tab-close {
+  display: none;
+}
+
+.tabbar-tab.dirty:hover .tabbar-tab-close {
+  display: flex;
+}
+
+.tabbar-tab.dirty:hover .tabbar-tab-dirty {
+  display: none;
+}
+
+/* 新建标签按钮 */
+.tabbar-new-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tabbar-new-btn:hover {
+  background: var(--panel-bg);
+  color: var(--fg);
+}
+
+/* 拖拽样式 */
+.tabbar-tab.dragging {
+  opacity: 0.5;
+}
+
+.tabbar-tab.drag-over-left::before,
+.tabbar-tab.drag-over-right::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: #3b82f6;
+  border-radius: 1px;
+}
+
+.tabbar-tab.drag-over-left::before {
+  left: -2px;
+}
+
+.tabbar-tab.drag-over-right::after {
+  right: -2px;
+}
+
+/* 深色模式下活跃标签指示线颜色 */
+@media (prefers-color-scheme: dark) {
+  .tabbar-tab.active::after {
+    background: #60a5fa;
+  }
+
+  .tabbar-tab.drag-over-left::before,
+  .tabbar-tab.drag-over-right::after {
+    background: #60a5fa;
+  }
+}
+
+/* 专注模式下隐藏标签栏 */
+body.focus-mode .tabbar {
+  display: none;
+}

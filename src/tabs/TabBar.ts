@@ -1,0 +1,331 @@
+/**
+ * 标签栏 UI 组件
+ *
+ * 功能：
+ * - 显示所有打开的标签
+ * - 点击切换标签
+ * - 中键/关闭按钮关闭标签
+ * - 拖拽排序
+ * - 新建标签按钮
+ */
+
+import { TabManager } from './TabManager'
+import { TabDocument, getTabDisplayName } from './types'
+
+export interface TabBarOptions {
+  container: HTMLElement
+  tabManager: TabManager
+  onBeforeClose?: (tab: TabDocument) => Promise<boolean> // 关闭前确认
+}
+
+export class TabBar {
+  private container: HTMLElement
+  private tabManager: TabManager
+  private onBeforeClose?: (tab: TabDocument) => Promise<boolean>
+  private tabsContainer: HTMLElement | null = null
+  private unsubscribe: (() => void) | null = null
+
+  // 拖拽状态
+  private draggedTabId: string | null = null
+  private dragOverTabId: string | null = null
+
+  constructor(options: TabBarOptions) {
+    this.container = options.container
+    this.tabManager = options.tabManager
+    this.onBeforeClose = options.onBeforeClose
+  }
+
+  /**
+   * 初始化标签栏
+   */
+  init(): void {
+    this.render()
+    this.bindEvents()
+  }
+
+  /**
+   * 渲染标签栏
+   */
+  private render(): void {
+    this.container.innerHTML = ''
+    this.container.className = 'tabbar'
+
+    // 标签容器（可滚动）
+    this.tabsContainer = document.createElement('div')
+    this.tabsContainer.className = 'tabbar-tabs'
+    this.container.appendChild(this.tabsContainer)
+
+    // 新建按钮
+    const newTabBtn = document.createElement('div')
+    newTabBtn.className = 'tabbar-new-btn'
+    newTabBtn.title = '新建标签 (Ctrl+T)'
+    newTabBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>'
+    newTabBtn.addEventListener('click', () => {
+      this.tabManager.createNewTab()
+    })
+    this.container.appendChild(newTabBtn)
+
+    // 渲染所有标签
+    this.renderTabs()
+  }
+
+  /**
+   * 渲染标签列表
+   */
+  private renderTabs(): void {
+    if (!this.tabsContainer) return
+
+    this.tabsContainer.innerHTML = ''
+    const tabs = this.tabManager.getTabs()
+    const activeTabId = this.tabManager.getActiveTabId()
+
+    for (const tab of tabs) {
+      const tabEl = this.createTabElement(tab, tab.id === activeTabId)
+      this.tabsContainer.appendChild(tabEl)
+    }
+  }
+
+  /**
+   * 创建单个标签元素
+   */
+  private createTabElement(tab: TabDocument, isActive: boolean): HTMLElement {
+    const tabEl = document.createElement('div')
+    tabEl.className = 'tabbar-tab' + (isActive ? ' active' : '') + (tab.dirty ? ' dirty' : '')
+    tabEl.dataset.tabId = tab.id
+    tabEl.draggable = true
+
+    // 文件图标
+    const icon = document.createElement('span')
+    icon.className = 'tabbar-tab-icon'
+    icon.innerHTML = this.getFileIcon(tab.filePath)
+    tabEl.appendChild(icon)
+
+    // 标签名称
+    const name = document.createElement('span')
+    name.className = 'tabbar-tab-name'
+    name.textContent = getTabDisplayName(tab)
+    name.title = tab.filePath || '未命名'
+    tabEl.appendChild(name)
+
+    // 修改指示器
+    if (tab.dirty) {
+      const dirtyDot = document.createElement('span')
+      dirtyDot.className = 'tabbar-tab-dirty'
+      dirtyDot.textContent = '●'
+      tabEl.appendChild(dirtyDot)
+    }
+
+    // 关闭按钮
+    const closeBtn = document.createElement('span')
+    closeBtn.className = 'tabbar-tab-close'
+    closeBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>'
+    closeBtn.title = '关闭'
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.closeTab(tab.id)
+    })
+    tabEl.appendChild(closeBtn)
+
+    // 点击切换
+    tabEl.addEventListener('click', () => {
+      this.tabManager.switchToTab(tab.id)
+    })
+
+    // 中键关闭
+    tabEl.addEventListener('mousedown', (e) => {
+      if (e.button === 1) { // 中键
+        e.preventDefault()
+        this.closeTab(tab.id)
+      }
+    })
+
+    // 拖拽事件
+    tabEl.addEventListener('dragstart', (e) => {
+      this.draggedTabId = tab.id
+      tabEl.classList.add('dragging')
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', tab.id)
+      }
+    })
+
+    tabEl.addEventListener('dragend', () => {
+      this.draggedTabId = null
+      tabEl.classList.remove('dragging')
+      // 清除所有拖拽样式
+      this.tabsContainer?.querySelectorAll('.tabbar-tab').forEach(el => {
+        el.classList.remove('drag-over-left', 'drag-over-right')
+      })
+    })
+
+    tabEl.addEventListener('dragover', (e) => {
+      e.preventDefault()
+      if (!this.draggedTabId || this.draggedTabId === tab.id) return
+
+      const rect = tabEl.getBoundingClientRect()
+      const midX = rect.left + rect.width / 2
+
+      // 清除之前的样式
+      tabEl.classList.remove('drag-over-left', 'drag-over-right')
+
+      // 根据鼠标位置显示插入指示器
+      if (e.clientX < midX) {
+        tabEl.classList.add('drag-over-left')
+      } else {
+        tabEl.classList.add('drag-over-right')
+      }
+
+      this.dragOverTabId = tab.id
+    })
+
+    tabEl.addEventListener('dragleave', () => {
+      tabEl.classList.remove('drag-over-left', 'drag-over-right')
+    })
+
+    tabEl.addEventListener('drop', (e) => {
+      e.preventDefault()
+      if (!this.draggedTabId || this.draggedTabId === tab.id) return
+
+      const tabs = this.tabManager.getTabs()
+      const fromIndex = tabs.findIndex(t => t.id === this.draggedTabId)
+      let toIndex = tabs.findIndex(t => t.id === tab.id)
+
+      // 根据放置位置调整目标索引
+      const rect = tabEl.getBoundingClientRect()
+      const midX = rect.left + rect.width / 2
+      if (e.clientX > midX && fromIndex < toIndex) {
+        // 不需要调整
+      } else if (e.clientX <= midX && fromIndex > toIndex) {
+        // 不需要调整
+      } else if (e.clientX > midX) {
+        toIndex++
+      }
+
+      // 确保索引在有效范围内
+      toIndex = Math.max(0, Math.min(toIndex, tabs.length - 1))
+
+      this.tabManager.moveTab(fromIndex, toIndex)
+
+      // 清除样式
+      tabEl.classList.remove('drag-over-left', 'drag-over-right')
+    })
+
+    return tabEl
+  }
+
+  /**
+   * 获取文件图标
+   */
+  private getFileIcon(filePath: string | null): string {
+    if (!filePath) {
+      return '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>'
+    }
+
+    const ext = filePath.split('.').pop()?.toLowerCase()
+
+    // Markdown 图标
+    if (ext === 'md' || ext === 'markdown' || ext === 'txt') {
+      return '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M20.56 18H3.44C2.65 18 2 17.37 2 16.59V7.41C2 6.63 2.65 6 3.44 6h17.12c.79 0 1.44.63 1.44 1.41v9.18c0 .78-.65 1.41-1.44 1.41zM6.81 15.19v-3.66l1.92 2.35 1.92-2.35v3.66h1.93V8.81h-1.93l-1.92 2.35-1.92-2.35H4.89v6.38h1.92zM19.69 12h-1.92V8.81h-1.92V12h-1.93l2.89 3.28L19.69 12z"/></svg>'
+    }
+
+    // PDF 图标（红色）
+    if (ext === 'pdf') {
+      return '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="#e53935" d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>'
+    }
+
+    // 默认文件图标
+    return '<svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>'
+  }
+
+  /**
+   * 关闭标签
+   */
+  private async closeTab(tabId: string): Promise<void> {
+    const tab = this.tabManager.findTabById(tabId)
+    if (!tab) return
+
+    // 如果有未保存内容，先确认
+    if (tab.dirty && this.onBeforeClose) {
+      const confirmed = await this.onBeforeClose(tab)
+      if (!confirmed) return
+    }
+
+    await this.tabManager.closeTab(tabId)
+  }
+
+  /**
+   * 绑定事件
+   */
+  private bindEvents(): void {
+    // 监听标签管理器事件
+    this.unsubscribe = this.tabManager.addEventListener((event) => {
+      switch (event.type) {
+        case 'tab-created':
+        case 'tab-closed':
+        case 'tab-switched':
+        case 'tab-updated':
+        case 'tabs-reordered':
+          this.renderTabs()
+          break
+      }
+    })
+  }
+
+  /**
+   * 更新单个标签（不重新渲染整个列表）
+   */
+  updateTab(tabId: string): void {
+    const tab = this.tabManager.findTabById(tabId)
+    if (!tab || !this.tabsContainer) return
+
+    const tabEl = this.tabsContainer.querySelector(`[data-tab-id="${tabId}"]`)
+    if (!tabEl) return
+
+    // 更新 dirty 状态
+    tabEl.classList.toggle('dirty', tab.dirty)
+
+    // 更新 dirty 指示器
+    let dirtyDot = tabEl.querySelector('.tabbar-tab-dirty')
+    if (tab.dirty && !dirtyDot) {
+      dirtyDot = document.createElement('span')
+      dirtyDot.className = 'tabbar-tab-dirty'
+      dirtyDot.textContent = '●'
+      tabEl.querySelector('.tabbar-tab-close')?.before(dirtyDot)
+    } else if (!tab.dirty && dirtyDot) {
+      dirtyDot.remove()
+    }
+
+    // 更新名称
+    const nameEl = tabEl.querySelector('.tabbar-tab-name')
+    if (nameEl) {
+      nameEl.textContent = getTabDisplayName(tab)
+      ;(nameEl as HTMLElement).title = tab.filePath || '未命名'
+    }
+  }
+
+  /**
+   * 滚动到当前活跃标签
+   */
+  scrollToActiveTab(): void {
+    if (!this.tabsContainer) return
+
+    const activeTabId = this.tabManager.getActiveTabId()
+    if (!activeTabId) return
+
+    const activeEl = this.tabsContainer.querySelector(`[data-tab-id="${activeTabId}"]`)
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+    }
+  }
+
+  /**
+   * 销毁组件
+   */
+  destroy(): void {
+    if (this.unsubscribe) {
+      this.unsubscribe()
+      this.unsubscribe = null
+    }
+    this.container.innerHTML = ''
+  }
+}

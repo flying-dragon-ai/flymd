@@ -5499,6 +5499,35 @@ try {
   }
 } catch {}
 
+// 暴露标签系统需要的函数（包装器模式）
+try {
+  if (typeof window !== 'undefined') {
+    // 状态获取/设置
+    ;(window as any).flymdSetCurrentFilePath = (path: string | null) => { currentFilePath = path }
+    ;(window as any).flymdSetDirty = (d: boolean) => { dirty = d; refreshTitle() }
+    ;(window as any).flymdGetMode = () => mode
+    ;(window as any).flymdSetMode = (m: Mode) => { mode = m }
+    ;(window as any).flymdGetWysiwygEnabled = () => wysiwyg
+    ;(window as any).flymdGetEditorContent = () => editor?.value ?? ''
+    // UI 刷新
+    ;(window as any).flymdRefreshTitle = () => refreshTitle()
+    ;(window as any).flymdRefreshPreview = () => { try { renderPreview() } catch {} }
+    // 文件操作
+    ;(window as any).flymdOpenFile = openFile2
+    ;(window as any).flymdNewFile = newFile
+    ;(window as any).flymdSaveFile = saveFile
+    // 确认对话框
+    ;(window as any).flymdConfirmNative = confirmNative
+    // 所见模式内容替换
+    ;(window as any).flymdWysiwygV2ReplaceAll = async (md: string) => {
+      try {
+        const { wysiwygV2ReplaceAll } = await import('./wysiwyg/v2')
+        await wysiwygV2ReplaceAll(md)
+      } catch {}
+    }
+  }
+} catch {}
+
 function showUploaderOverlay(show: boolean) {
   const overlay = document.getElementById('uploader-overlay') as HTMLDivElement | null
   if (!overlay) return
@@ -10617,3 +10646,6 @@ function shouldSanitizePreview(): boolean {
   // 默认策略：开发环境开启，发行版关闭（仅针对预览渲染，粘贴/更新弹窗仍保留基础消毒）
   try { return !!((import.meta as any).env?.DEV) } catch { return false }
 }
+
+// 初始化多标签系统（包装器模式，最小侵入）
+import('./tabs/integration').catch(e => console.warn('[Tabs] Failed to load tab system:', e))

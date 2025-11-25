@@ -43,6 +43,7 @@ let _codeCopyHost: HTMLElement | null = null
 let _codeCopyScrollHandler: (() => void) | null = null
 let _codeCopyResizeObserver: ResizeObserver | null = null
 let _codeCopyWindowResizeHandler: (() => void) | null = null
+let _inlineCodeMouseTimer: number | null = null
 
 function toLocalAbsFromSrc(src: string): string | null {
   try {
@@ -257,6 +258,20 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
   const hit = t?.closest?.("div[data-type='math_block']") || t?.closest?.("span[data-type='math_inline']");
   if (hit) { ev.stopPropagation(); try { enterLatexSourceEdit(hit as HTMLElement) } catch {} }
 }, true) } catch {} 
+      try {
+        pm.addEventListener('keydown', (ev) => {
+          try {
+            if ((ev as KeyboardEvent).key !== 'ArrowRight') return
+            if (exitInlineCodeToRight()) {
+              ev.preventDefault()
+              try { ev.stopPropagation() } catch {}
+              try { (ev as any).stopImmediatePropagation?.() } catch {}
+            }
+          } catch {}
+        }, true)
+      } catch {}
+      try { pm.addEventListener('mouseup', () => { try { scheduleInlineCodeMouseExit() } catch {} }, true) } catch {}
+      try { pm.addEventListener('touchend', () => { try { scheduleInlineCodeMouseExit() } catch {} }, true) } catch {}
       try { setupCodeCopyOverlay(pm) } catch {}
     }
     const host = _root?.firstElementChild as HTMLElement | null
@@ -351,6 +366,62 @@ export async function wysiwygV2ReplaceAll(markdown: string) {
 // - 全部替换：单事务从后往前批量替换，避免位置偏移；
 
 function _getView(): any { try { return (_editor as any)?.ctx?.get?.(editorViewCtx) } catch { return null } }
+function exitInlineCodeToRight(focusView = true): boolean {
+  try {
+    const view = _getView()
+    if (!view) return false
+    const sel = window.getSelection()
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false
+    const range = sel.getRangeAt(0)
+    const codeEl = findInlineCodeAncestor(range.startContainer)
+    if (!codeEl) return false
+    if (!isCaretAtInlineCodeEnd(range, codeEl)) return false
+    const parent = codeEl.parentNode
+    if (!parent) return false
+    const idx = Array.prototype.indexOf.call(parent.childNodes, codeEl)
+    if (idx < 0) return false
+    const pos = view.posAtDOM(parent as Node, idx + 1)
+    const state = view.state
+    const tr = state.tr.setSelection(TextSelection.create(state.doc, pos))
+    view.dispatch(tr)
+    if (focusView) {
+      try { view.focus() } catch {}
+    }
+    return true
+  } catch { return false }
+}
+
+function scheduleInlineCodeMouseExit() {
+  try {
+    if (_inlineCodeMouseTimer != null) { window.clearTimeout(_inlineCodeMouseTimer); _inlineCodeMouseTimer = null }
+  } catch {}
+  _inlineCodeMouseTimer = window.setTimeout(() => {
+    _inlineCodeMouseTimer = null
+    try { exitInlineCodeToRight() } catch {}
+  }, 0)
+}
+
+function findInlineCodeAncestor(node: Node | null): HTMLElement | null {
+  try {
+    let cur: Node | null = node
+    while (cur) {
+      if (cur instanceof HTMLElement) {
+        if (cur.tagName === 'CODE' && !cur.closest('pre')) return cur
+      }
+      cur = cur.parentNode
+    }
+    return null
+  } catch { return null }
+}
+
+function isCaretAtInlineCodeEnd(range: Range, codeEl: HTMLElement): boolean {
+  try {
+    const probe = document.createRange()
+    probe.selectNodeContents(codeEl)
+    probe.collapse(false)
+    return range.compareBoundaryPoints(Range.START_TO_START, probe) === 0
+  } catch { return false }
+}
 function _norm(s: string, cs: boolean): string { return cs ? s : s.toLowerCase() }
 
 function _find(term: string, cs: boolean, backwards = false): { from: number, to: number } | null {

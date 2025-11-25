@@ -243,6 +243,7 @@ export async function initTabSystem(): Promise<void> {
   hookOpenFile()
   hookNewFile()
   hookSaveFile()
+  hookFileSavedEvent()
   hookKeyboardShortcuts()
 
   // 监听编辑器变化，同步 dirty 状态
@@ -524,6 +525,23 @@ function hookSaveFile(): void {
       tabManager.markCurrentTabSaved()
     }
   }
+}
+
+/**
+ * 监听文件保存事件
+ */
+function hookFileSavedEvent(): void {
+  window.addEventListener('flymd-file-saved', () => {
+    const flymd = getFlymd()
+    const tab = tabManager.getActiveTab()
+    if (tab) {
+      const newPath = flymd.flymdGetCurrentFilePath?.()
+      if (newPath && newPath !== tab.filePath) {
+        tabManager.updateCurrentTabPath(newPath)
+      }
+      tabManager.markCurrentTabSaved()
+    }
+  })
 }
 
 /**

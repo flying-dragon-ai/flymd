@@ -4683,6 +4683,8 @@ async function saveFile() {
     }
     dirty = false
     refreshTitle()
+    // 通知标签系统文件已保存
+    window.dispatchEvent(new CustomEvent('flymd-file-saved'))
     await pushRecent(currentFilePath)
     await renderRecentPanel(false)
     logInfo('文件保存成功', { path: currentFilePath, size: editor.value.length })

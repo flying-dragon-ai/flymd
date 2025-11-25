@@ -1603,15 +1603,9 @@ export async function openWebdavSyncDialog(): Promise<void> {
             <div class="upl-hint warn pad-1ch sync-http-warn hidden" style="margin-top: 6px;">
               ${t('sync.allowHttp.warn')}
             </div>
-            <div class="sync-http-hosts hidden" style="margin-top: 6px;">
-              <div class="upl-field" style="display: flex; flex-direction: column; gap: 6px;">
-                <div style="font-weight: 500;">${t('sync.allowHttp.hosts')}</div>
-                <div id="sync-http-hosts-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <button type="button" id="sync-add-http-host" class="btn-secondary" style="padding: 4px 10px;">${t('sync.allowHttp.addHost')}</button>
-                  <div class="upl-hint" style="margin: 0;">${t('sync.allowHttp.hostsHint')}</div>
-                </div>
-              </div>
+            <label class="sync-http-hosts hidden">${t('sync.allowHttp.hosts')}</label>
+            <div class="upl-field sync-http-hosts hidden">
+              <div id="sync-http-hosts-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
             </div>
 
             <label for="sync-timeout">${t('sync.timeout.label')}</label>
@@ -1716,9 +1710,8 @@ export async function openWebdavSyncDialog(): Promise<void> {
   const elAllowHttp = overlay.querySelector('#sync-allow-http') as HTMLInputElement
   const elAllowHttpWarn = overlay.querySelector('.sync-http-warn') as HTMLDivElement | null
   const elShutdownWarn = overlay.querySelector('.sync-shutdown-warn') as HTMLDivElement | null
-  const elHttpHostsSection = overlay.querySelector('.sync-http-hosts') as HTMLDivElement | null
+  const elHttpHostsSections = overlay.querySelectorAll('.sync-http-hosts') as NodeListOf<HTMLElement>
   const elHttpHostsList = overlay.querySelector('#sync-http-hosts-list') as HTMLDivElement | null
-  const btnAddHttpHost = overlay.querySelector('#sync-add-http-host') as HTMLButtonElement | null
 
   const cfg = await getWebdavSyncConfig()
   elEnabled.checked = !!cfg.enabled
@@ -1743,12 +1736,21 @@ export async function openWebdavSyncDialog(): Promise<void> {
     row.style.display = 'flex'
     row.style.gap = '6px'
     row.style.alignItems = 'center'
+    row.style.width = '100%'
 
     const input = document.createElement('input')
     input.type = 'text'
     input.placeholder = httpHostPlaceholder
     input.value = value
     input.style.flex = '1'
+    input.style.minWidth = '0'
+    input.style.width = '100%'
+    input.style.padding = '8px'
+    input.style.border = '1px solid var(--border-color, #ccc)'
+    input.style.borderRadius = '4px'
+    input.style.background = 'var(--input-bg, #fff)'
+    input.style.color = 'var(--text-color, #333)'
+    input.style.fontSize = '14px'
     row.appendChild(input)
 
     const btnRemove = document.createElement('button')
@@ -1756,11 +1758,26 @@ export async function openWebdavSyncDialog(): Promise<void> {
     btnRemove.textContent = '-'
     btnRemove.title = t('sync.allowHttp.removeHost')
     btnRemove.className = 'btn-secondary'
-    btnRemove.style.padding = '4px 10px'
+    btnRemove.style.padding = '6px 12px'
+    btnRemove.style.flexShrink = '0'
     btnRemove.addEventListener('click', () => {
       row.remove()
+      // 确保至少有一行输入框
+      ensureHttpHostRowWhenVisible()
     })
     row.appendChild(btnRemove)
+
+    const btnAdd = document.createElement('button')
+    btnAdd.type = 'button'
+    btnAdd.textContent = '+'
+    btnAdd.title = t('sync.allowHttp.addHost')
+    btnAdd.className = 'btn-secondary'
+    btnAdd.style.padding = '6px 12px'
+    btnAdd.style.flexShrink = '0'
+    btnAdd.addEventListener('click', () => {
+      addHttpHostRow('')
+    })
+    row.appendChild(btnAdd)
 
     elHttpHostsList.appendChild(row)
   }
@@ -1797,21 +1814,18 @@ export async function openWebdavSyncDialog(): Promise<void> {
   }
   refreshAllowHttpWarn()
   const refreshHttpHostsVisibility = () => {
-    if (!elHttpHostsSection) return
+    if (!elHttpHostsSections.length) return
     if (elAllowHttp.checked) {
-      elHttpHostsSection.classList.remove('hidden')
+      elHttpHostsSections.forEach(el => el.classList.remove('hidden'))
       ensureHttpHostRowWhenVisible()
     } else {
-      elHttpHostsSection.classList.add('hidden')
+      elHttpHostsSections.forEach(el => el.classList.add('hidden'))
     }
   }
   refreshHttpHostsVisibility()
   elAllowHttp.addEventListener('change', () => {
     refreshAllowHttpWarn()
     refreshHttpHostsVisibility()
-  })
-  btnAddHttpHost?.addEventListener('click', () => {
-    addHttpHostRow('')
   })
 
   const refreshShutdownWarn = () => {

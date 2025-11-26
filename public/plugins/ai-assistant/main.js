@@ -1517,7 +1517,28 @@ function buildPromptPrefix(kind){
 async function quick(context, kind){
   const inp = el('ai-text')
   const prefix = buildPromptPrefix(kind)
-  inp.value = prefix
+  let finalPrompt = prefix
+
+  // 对续写 / 润色 / 纠错：如果有选中文本，则优先基于选中内容进行处理
+  if (['续写', '润色', '纠错'].includes(kind)) {
+    try {
+      const sel = await context.getSelection?.()
+      if (sel && sel.text && sel.text.trim()) {
+        const selected = sel.text.trim()
+        finalPrompt = [
+          prefix,
+          '',
+          '当前选中内容：',
+          '',
+          selected,
+          '',
+          `请仅针对这段选中内容进行${kind}，不要处理文档中未选中的部分。`
+        ].join('\n')
+      }
+    } catch {}
+  }
+
+  inp.value = finalPrompt
   await sendFromInput(context)
 }
 

@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.4.6
+- Added: Right-click context menu items now support drag-and-drop sorting with persistent storage, while built-in entries stay locked to prevent mistakes.
+- Added: Exit prompts and WebDAV conflict/delete confirmations are replaced with custom three-button dialogs (Save / Discard / Cancel) so every choice is explicit.
+- Improved: On launch the app reads the OS dark preference, automatically forces night mode when appropriate, and ships refreshed tab-bar polish for dark themes.
+- Improved: The extension runtime exposes a static asset URL helper, letting the AI assistant bundle avatar/fallback resources so icons render even offline.
+- Fixed: Switching tabs no longer falsely marks documents as dirty, so confirmation dialogs only appear when real edits exist.
+
 ## Update v0.4.5
 - Added: WebDAV sync now exposes a HTTP host whitelist so plaintext sync only runs against explicitly trusted hosts/ports, blocking accidental connections to unknown nodes.
 - Improved: The sync dialog gains inline whitelist rows with + / - controls and empty-state hints, always keeping at least one editable input for smoother configuration.

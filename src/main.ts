@@ -2991,7 +2991,7 @@ function showWidthBubble(): void {
 }
 
 // ===== 通知系统（支持多消息堆叠显示） =====
-type NotificationType = 'sync' | 'extension' | 'appUpdate'
+type NotificationType = 'sync' | 'extension' | 'appUpdate' | 'plugin-success' | 'plugin-error'
 
 interface NotificationConfig {
   icon: string
@@ -3030,6 +3030,16 @@ class NotificationManager {
       bgColor: 'rgba(59,130,246,0.12)',
       duration: 10000,
       clickable: true
+    },
+    'plugin-success': {
+      icon: '✔',
+      bgColor: 'rgba(34,197,94,0.12)', // 浅绿色
+      duration: 2000
+    },
+    'plugin-error': {
+      icon: '✖',
+      bgColor: 'rgba(239,68,68,0.12)', // 浅红色（red-500）
+      duration: 3000
     }
   }
 
@@ -9826,14 +9836,21 @@ async function getHttpClient(): Promise<{ fetch?: any; Body?: any; ResponseType?
   } catch { return null }
 }
 
-function pluginNotice(msg: string, level: 'ok' | 'err' = 'ok', ms = 1600) {
+function pluginNotice(msg: string, level: 'ok' | 'err' = 'ok', ms?: number) {
   try {
-    const el = document.getElementById('status')
-    if (el) {
-      el.textContent = (level === 'ok' ? '✔ ' : '✖ ') + msg
-      setTimeout(() => { try { el.textContent = '' } catch {} }, ms)
-    }
-  } catch {}
+    // 使用新的通知系统
+    const type: NotificationType = level === 'ok' ? 'plugin-success' : 'plugin-error'
+    NotificationManager.show(type, msg, ms)
+  } catch (e) {
+    // 降级：使用旧的状态栏
+    try {
+      const el = document.getElementById('status')
+      if (el) {
+        el.textContent = (level === 'ok' ? '✔ ' : '✖ ') + msg
+        setTimeout(() => { try { el.textContent = '' } catch {} }, ms || 1600)
+      }
+    } catch {}
+  }
 }
 
 async function getInstalledPlugins(): Promise<Record<string, InstalledPlugin>> {
@@ -10294,7 +10311,32 @@ async function activatePlugin(p: InstalledPlugin): Promise<void> {
       } catch { return () => {} }
     },
     ui: {
+      // 简化的通知方法（向后兼容）
       notice: (msg: string, level?: 'ok' | 'err', ms?: number) => pluginNotice(msg, level, ms),
+      // 完整的通知 API
+      showNotification: (message: string, options?: { type?: 'success' | 'error' | 'info', duration?: number, onClick?: () => void }) => {
+        try {
+          const opt = options || {}
+          let notifType: NotificationType = 'plugin-success'
+          if (opt.type === 'error') notifType = 'plugin-error'
+          else if (opt.type === 'info') notifType = 'extension'
+          else notifType = 'plugin-success'
+
+          return NotificationManager.show(notifType, message, opt.duration, opt.onClick)
+        } catch (e) {
+          console.error('[Plugin] showNotification 失败', e)
+          return ''
+        }
+      },
+      // 隐藏通知
+      hideNotification: (id: string) => {
+        try {
+          NotificationManager.hide(id)
+        } catch (e) {
+          console.error('[Plugin] hideNotification 失败', e)
+        }
+      },
+      // 确认对话框
       confirm: async (message: string) => { try { return await confirmNative(message, '确认') } catch { return false } }
     },
     getEditorValue: () => editor.value,
@@ -10797,7 +10839,30 @@ async function refreshExtensionsUI(): Promise<void> {
                 get: async (key: string) => { try { if (!store) return null; const all = (await store.get('plugin:' + p.id)) as any || {}; return all[key] } catch { return null } },
                 set: async (key: string, value: any) => { try { if (!store) return; const all = (await store.get('plugin:' + p.id)) as any || {}; all[key] = value; await store.set('plugin:' + p.id, all); await store.save() } catch {} }
               },
-              ui: { notice: (msg: string, level?: 'ok' | 'err', ms?: number) => pluginNotice(msg, level, ms), confirm: async (m: string) => { try { return await confirmNative(m) } catch { return false } } },
+              ui: {
+                notice: (msg: string, level?: 'ok' | 'err', ms?: number) => pluginNotice(msg, level, ms),
+                showNotification: (message: string, options?: { type?: 'success' | 'error' | 'info', duration?: number, onClick?: () => void }) => {
+                  try {
+                    const opt = options || {}
+                    let notifType: NotificationType = 'plugin-success'
+                    if (opt.type === 'error') notifType = 'plugin-error'
+                    else if (opt.type === 'info') notifType = 'extension'
+                    else notifType = 'plugin-success'
+                    return NotificationManager.show(notifType, message, opt.duration, opt.onClick)
+                  } catch (e) {
+                    console.error('[Plugin] showNotification 失败', e)
+                    return ''
+                  }
+                },
+                hideNotification: (id: string) => {
+                  try {
+                    NotificationManager.hide(id)
+                  } catch (e) {
+                    console.error('[Plugin] hideNotification 失败', e)
+                  }
+                },
+                confirm: async (m: string) => { try { return await confirmNative(m) } catch { return false } }
+              },
               getEditorValue: () => editor.value,
               setEditorValue: (v: string) => { try { editor.value = v; dirty = true; refreshTitle(); refreshStatus(); if (mode === 'preview') { void renderPreview() } else if (wysiwyg) { scheduleWysiwygRender() } } catch {} },
             }

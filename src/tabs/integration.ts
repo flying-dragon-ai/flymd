@@ -447,9 +447,9 @@ function hookOpenFile(): void {
       !currentTab.dirty &&
       !currentTab.content.trim()
 
-    // Ctrl+点击：先创建新标签，再打开文档（用户建议的稳定方案）
-    // 这样原标签的内容会在创建新标签时被保存
-    if (ctrlKeyPressed && currentTab && !isCurrentTabEmpty) {
+    // 当前标签已有内容：直接新建标签，再打开文档，避免覆盖
+    const shouldOpenNewTab = !!(currentTab && !isCurrentTabEmpty)
+    if (shouldOpenNewTab) {
       // 先创建新空白标签（这会保存当前标签状态）
       tabManager.createNewTab()
       // 暂停轮询检测，避免冲突
@@ -650,10 +650,8 @@ function startPathSyncWatcher(): void {
       // 新文件，检查是否按住 Ctrl
       const isCurrentTabEmpty = !currentTab.filePath && !currentTab.dirty && !currentTab.content.trim()
 
-      if (ctrlKeyPressed && !isCurrentTabEmpty) {
-        // Ctrl+点击：创建新标签，再恢复原标签内容
-        // 问题：openFile 内部会调用 saveCurrentTabState，会用编辑器当前内容（文档2）覆盖原标签
-        // 解决：先记录原标签ID和内容，openFile 之后再恢复
+      if (!isCurrentTabEmpty) {
+        // 当前标签已有内容：创建新标签，再恢复原标签内容，避免覆盖
         const originalTabId = currentTab.id
         const originalContent = lastKnownContent
         const originalPath = currentTab.filePath
@@ -683,17 +681,11 @@ function startPathSyncWatcher(): void {
   }, 100)
 }
 
-// 记录是否按住 Ctrl 键
-let ctrlKeyPressed = false
-document.addEventListener('keydown', (e) => { if (e.key === 'Control') ctrlKeyPressed = true })
-document.addEventListener('keyup', (e) => { if (e.key === 'Control') ctrlKeyPressed = false })
-document.addEventListener('blur', () => { ctrlKeyPressed = false })
-
 /**
- * 检查是否应该在新标签打开
+ * 当前策略：始终在新标签中打开（如果当前标签非空）
  */
 export function shouldOpenInNewTab(): boolean {
-  return ctrlKeyPressed
+  return true
 }
 
 /**

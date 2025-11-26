@@ -2003,7 +2003,7 @@ app.innerHTML = `
     <textarea id="editor" class="editor" spellcheck="false" placeholder="${t('editor.placeholder')}"></textarea>
     <div id="preview" class="preview hidden"></div>
     <div class="statusbar" id="status">${fmtStatus(1,1)}</div>
-    <div class="sync-status" id="sync-status"></div>
+    <div class="notification-container" id="notification-container"></div>
     <div class="status-zoom" id="status-zoom"><span id="zoom-label">100%</span> <button id="zoom-reset" title="重置缩放">重置</button></div>
   </div>
 `
@@ -2989,6 +2989,173 @@ function showWidthBubble(): void {
     }, 2000)
   } catch {}
 }
+
+// ===== 通知系统（支持多消息堆叠显示） =====
+type NotificationType = 'sync' | 'extension' | 'appUpdate'
+
+interface NotificationConfig {
+  icon: string
+  bgColor: string
+  duration: number
+  clickable?: boolean
+}
+
+interface NotificationItem {
+  id: string
+  type: NotificationType
+  message: string
+  element: HTMLDivElement
+  timer: number | null
+  onClick?: () => void
+}
+
+class NotificationManager {
+  private static container: HTMLDivElement | null = null
+  private static notifications: Map<string, NotificationItem> = new Map()
+  private static idCounter = 0
+
+  private static readonly configs: Record<NotificationType, NotificationConfig> = {
+    sync: {
+      icon: '🔄',
+      bgColor: 'rgba(127,127,127,0.08)',
+      duration: 5000
+    },
+    extension: {
+      icon: '🔔',
+      bgColor: 'rgba(34,197,94,0.12)',
+      duration: 5000
+    },
+    appUpdate: {
+      icon: '⬆️',
+      bgColor: 'rgba(59,130,246,0.12)',
+      duration: 10000,
+      clickable: true
+    }
+  }
+
+  private static ensureContainer(): HTMLDivElement {
+    if (this.container && document.body.contains(this.container)) {
+      return this.container
+    }
+
+    // 查找已存在的容器（兼容旧的 sync-status）
+    let el = document.getElementById('notification-container') as HTMLDivElement | null
+    if (!el) {
+      el = document.getElementById('sync-status') as HTMLDivElement | null
+      if (el) {
+        el.id = 'notification-container'
+        el.className = 'notification-container'
+        el.innerHTML = ''
+      }
+    }
+
+    if (!el) {
+      el = document.createElement('div')
+      el.id = 'notification-container'
+      el.className = 'notification-container'
+      document.body.appendChild(el)
+    }
+
+    this.container = el
+    return el
+  }
+
+  static show(type: NotificationType, message: string, duration?: number, onClick?: () => void): string {
+    try {
+      const container = this.ensureContainer()
+      const config = this.configs[type]
+      const id = `notification-${++this.idCounter}`
+
+      // 创建通知元素
+      const item = document.createElement('div')
+      item.className = 'notification-item' + (config.clickable ? ' clickable' : '')
+      item.style.backgroundColor = config.bgColor
+      item.innerHTML = `<span class="notification-icon">${config.icon}</span> <span class="notification-text">${message}</span>`
+
+      // 点击事件
+      if (onClick) {
+        item.addEventListener('click', () => {
+          onClick()
+          this.hide(id)
+        })
+      }
+
+      // 添加到容器
+      container.appendChild(item)
+
+      // 设置自动清除定时器
+      const finalDuration = duration !== undefined ? duration : config.duration
+      const timer = finalDuration > 0 ? window.setTimeout(() => {
+        this.hide(id)
+      }, finalDuration) : null
+
+      // 保存通知信息
+      this.notifications.set(id, {
+        id,
+        type,
+        message,
+        element: item,
+        timer,
+        onClick
+      })
+
+      return id
+    } catch (e) {
+      console.error('[Notification] 显示通知失败', e)
+      return ''
+    }
+  }
+
+  static hide(id: string): void {
+    try {
+      const notification = this.notifications.get(id)
+      if (!notification) return
+
+      // 清除定时器
+      if (notification.timer !== null) {
+        window.clearTimeout(notification.timer)
+      }
+
+      // 淡出动画
+      notification.element.style.opacity = '0'
+      setTimeout(() => {
+        try {
+          notification.element.remove()
+        } catch {}
+      }, 200)
+
+      this.notifications.delete(id)
+    } catch (e) {
+      console.error('[Notification] 隐藏通知失败', e)
+    }
+  }
+
+  static hideAll(): void {
+    try {
+      this.notifications.forEach((_, id) => this.hide(id))
+    } catch {}
+  }
+
+  static updateMessage(id: string, message: string): void {
+    try {
+      const notification = this.notifications.get(id)
+      if (!notification) return
+
+      const textEl = notification.element.querySelector('.notification-text')
+      if (textEl) {
+        textEl.textContent = message
+        notification.message = message
+      }
+    } catch {}
+  }
+}
+
+// 向后兼容：保留旧的 sync-status 接口
+function updateSyncStatus(msg: string): void {
+  // 直接使用新的通知系统
+  NotificationManager.show('sync', msg)
+}
+
 let _wheelHandlerRef: ((e: WheelEvent)=>void) | null = null
   if (containerEl) {
   // 修复在所见模式中滚轮无法滚动编辑区的问题：
@@ -4433,18 +4600,36 @@ function showUpdateDownloadedOverlay(savePath: string, resp: CheckUpdateResp) {
 
 async function checkUpdateInteractive() {
   try {
-    upMsg('正在检查更新…')
+    // 使用通知系统显示检查进度
+    const checkingId = NotificationManager.show('appUpdate', '正在检查更新…', 0)
     const resp = await invoke('check_update', { force: true, include_prerelease: false }) as any as CheckUpdateResp
-    if (!resp || !resp.hasUpdate) { setUpdateBadge(false); upMsg(`已是最新版本 v${APP_VERSION}`); return }
+
+    // 隐藏检查中的通知
+    NotificationManager.hide(checkingId)
+
+    if (!resp || !resp.hasUpdate) {
+      setUpdateBadge(false)
+      // 显示"已是最新版本"通知（5秒后消失）
+      NotificationManager.show('appUpdate', `已是最新版本 v${APP_VERSION}`, 5000)
+      return
+    }
+
     setUpdateBadge(true, `发现新版本 v${resp.latest}`)
     const USE_OVERLAY_UPDATE = true; if (USE_OVERLAY_UPDATE) { await showUpdateOverlay(resp); return }
     // Windows：自动下载并运行；Linux：展示两个下载链接（依据后端返回的资产类型判断）
     if (resp.assetWin) {
-      if (!resp.assetWin) { upMsg('发现新版本，但未找到 Windows 安装包'); await openInBrowser(resp.htmlUrl); return }
+      if (!resp.assetWin) {
+        NotificationManager.show('appUpdate', '发现新版本，但未找到 Windows 安装包', 5000)
+        await openInBrowser(resp.htmlUrl)
+        return
+      }
       const ok = await confirmNative(`发现新版本 ${resp.latest}（当前 ${resp.current}）\n是否立即下载并安装？`, '更新')
-      if (!ok) { upMsg('已取消更新'); return }
+      if (!ok) {
+        NotificationManager.show('appUpdate', '已取消更新', 3000)
+        return
+      }
       try {
-        upMsg('正在下载安装包…')
+        const downloadId = NotificationManager.show('appUpdate', '正在下载安装包…', 0)
         let savePath = ''
         {
           const direct = resp.assetWin.directUrl
@@ -4467,10 +4652,17 @@ async function checkUpdateInteractive() {
           }
           if (!ok) throw new Error('all proxies failed')
         }
-        upMsg('下载完成，正在启动安装…')
-        try { await invoke('run_installer', { path: savePath }); upMsg('已启动安装程序，即将关闭…'); setTimeout(() => { try { void getCurrentWindow().destroy() } catch {} }, 800) } catch (e) { showUpdateDownloadedOverlay(savePath, resp) }
+        NotificationManager.hide(downloadId)
+        NotificationManager.show('appUpdate', '下载完成，正在启动安装…', 5000)
+        try {
+          await invoke('run_installer', { path: savePath })
+          NotificationManager.show('appUpdate', '已启动安装程序，即将关闭…', 3000)
+          setTimeout(() => { try { void getCurrentWindow().destroy() } catch {} }, 800)
+        } catch (e) {
+          showUpdateDownloadedOverlay(savePath, resp)
+        }
       } catch (e) {
-        upMsg('下载或启动安装失败，将打开发布页');
+        NotificationManager.show('appUpdate', '下载或启动安装失败，将打开发布页', 5000)
         await openInBrowser(resp.htmlUrl)
       }
       return
@@ -4479,9 +4671,12 @@ async function checkUpdateInteractive() {
     if (resp.assetMacosArm || resp.assetMacosX64) {
       const a = (resp.assetMacosArm || resp.assetMacosX64) as UpdateAssetInfo
       const ok = await confirmNative(`发现新版本 ${resp.latest}（当前 ${resp.current}）\n是否立即下载并安装？`, '更新')
-      if (!ok) { upMsg('已取消更新'); return }
+      if (!ok) {
+        NotificationManager.show('appUpdate', '已取消更新', 3000)
+        return
+      }
       try {
-        upMsg('正在下载安装包…')
+        const downloadId = NotificationManager.show('appUpdate', '正在下载安装包…', 0)
         let savePath = ''
         {
           const direct = a.directUrl
@@ -4502,10 +4697,15 @@ async function checkUpdateInteractive() {
           }
           if (!ok) throw new Error('all proxies failed')
         }
-        upMsg('下载完成，正在打开…')
-        try { await openPath(savePath) } catch { showUpdateDownloadedOverlay(savePath, resp as any) }
+        NotificationManager.hide(downloadId)
+        NotificationManager.show('appUpdate', '下载完成，正在打开…', 5000)
+        try {
+          await openPath(savePath)
+        } catch {
+          showUpdateDownloadedOverlay(savePath, resp as any)
+        }
       } catch (e) {
-        upMsg('下载或打开失败，将打开发布页');
+        NotificationManager.show('appUpdate', '下载或打开失败，将打开发布页', 5000)
         await openInBrowser(resp.htmlUrl)
       }
       return
@@ -4679,6 +4879,10 @@ function checkUpdateSilentOnceAfterStartup() {
         const resp = await invoke('check_update', { force: false, include_prerelease: false }) as any as CheckUpdateResp
         if (resp && resp.hasUpdate) {
           setUpdateBadge(true, `发现新版本 v${resp.latest}`)
+          // 显示应用更新通知（10秒后自动消失，点击打开更新对话框）
+          NotificationManager.show('appUpdate', `发现新版本 v${resp.latest}，点击查看详情`, 10000, () => {
+            showUpdateOverlay(resp)
+          })
         }
       } catch {
         // 静默失败不提示
@@ -5820,6 +6024,11 @@ try {
       } catch {}
     }
   }
+} catch {}
+
+// 暴露通知管理器供其他模块使用
+try {
+  ;(window as any).NotificationManager = NotificationManager
 } catch {}
 
 function showUploaderOverlay(show: boolean) {
@@ -10353,13 +10562,8 @@ async function fetchRemoteManifestVersion(url: string): Promise<string | null> {
       }
 
       try {
-        const el = document.getElementById('sync-status')
-        if (el) {
-          el.textContent = msg
-          setTimeout(() => {
-            try { if (el && el.textContent === msg) el.textContent = '' } catch {}
-          }, 5000)
-        }
+        // 使用新的通知系统显示扩展更新通知（5秒后自动消失）
+        NotificationManager.show('extension', msg, 5000)
       } catch {}
     } catch (e) {
       console.warn('[Extensions] 启动扩展更新检查失败', e)

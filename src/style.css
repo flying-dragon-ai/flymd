@@ -1178,24 +1178,81 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   display: none;
 }
 
-.sync-status {
-  position: absolute;
+/* 通知容器：支持多消息堆叠 */
+.notification-container {
+  position: fixed;
   right: 14px;
   bottom: 10px;
+  z-index: 999999; /* 最高层级，确保不被任何弹窗遮挡 */
+  display: flex;
+  flex-direction: column-reverse; /* 新消息从下往上堆叠 */
+  gap: 8px;
+  pointer-events: none; /* 容器本身不拦截事件 */
+}
+
+/* 通知项 */
+.notification-item {
+  pointer-events: auto; /* 通知可交互 */
   font-size: 12px;
   font-weight: 500;
-  color: var(--muted);
-  padding: 6px 12px;
-  background: rgba(127,127,127,0.05);
-  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 8px 14px;
   border-radius: 8px;
-  backdrop-filter: blur(4px);
-  transition: all 0.25s ease;
-  letter-spacing: 0.02em;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(127,127,127,0.2);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   max-width: 400px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  animation: notificationSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notification-item .notification-icon {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.notification-item .notification-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 可点击的通知 */
+.notification-item.clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.notification-item.clickable:hover {
+  opacity: 0.85;
+  transform: translateY(-1px);
+}
+
+.notification-item.clickable:active {
+  transform: translateY(0);
+}
+
+/* 通知滑入动画 */
+@keyframes notificationSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 向后兼容：旧的 sync-status ID */
+#sync-status {
+  /* 保持为空，已被 notification-container 替代 */
 }
 
 .sync-status:empty {

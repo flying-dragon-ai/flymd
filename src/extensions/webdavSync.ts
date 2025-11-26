@@ -11,24 +11,60 @@ import { ask } from '@tauri-apps/plugin-dialog'
 import { t } from '../i18n'
 import { showConflictDialog, showLocalDeleteDialog, showRemoteDeleteDialog } from '../dialog'
 
-// 更新同步状态显示
+// 当前同步通知ID（用于更新同一条通知）
+let _currentSyncNotificationId: string | null = null
+
+// 更新同步状态显示（使用新的通知系统）
 function updateStatus(msg: string) {
   try {
-    const el = document.getElementById('sync-status')
-    if (el) el.textContent = msg
-  } catch {}
+    const NotificationManager = (window as any).NotificationManager
+    if (!NotificationManager) {
+      // 降级：使用旧方式
+      const el = document.getElementById('sync-status') || document.getElementById('notification-container')
+      if (el) el.textContent = msg
+      return
+    }
+
+    // 如果已有同步通知，更新它；否则创建新的
+    if (_currentSyncNotificationId) {
+      NotificationManager.updateMessage(_currentSyncNotificationId, msg)
+    } else {
+      // 创建持久化通知（duration=0表示不自动清除）
+      _currentSyncNotificationId = NotificationManager.show('sync', msg, 0)
+    }
+  } catch (e) {
+    console.warn('[Sync] 更新状态失败', e)
+  }
 }
 
 // 清空同步状态
-function clearStatus(delayMs: number = 1800) {
+function clearStatus(delayMs: number = 5000) {
   try {
-    const el = document.getElementById('sync-status')
-    if (el) {
-      setTimeout(() => {
-        try { if (el) el.textContent = '' } catch {}
-      }, delayMs)
+    const NotificationManager = (window as any).NotificationManager
+    if (!NotificationManager) {
+      // 降级：使用旧方式
+      const el = document.getElementById('sync-status') || document.getElementById('notification-container')
+      if (el) {
+        setTimeout(() => {
+          try { if (el) el.textContent = '' } catch {}
+        }, delayMs)
+      }
+      return
     }
-  } catch {}
+
+    // 延迟清除当前同步通知
+    if (_currentSyncNotificationId) {
+      const id = _currentSyncNotificationId
+      setTimeout(() => {
+        try {
+          NotificationManager.hide(id)
+        } catch {}
+      }, delayMs)
+      _currentSyncNotificationId = null
+    }
+  } catch (e) {
+    console.warn('[Sync] 清除状态失败', e)
+  }
 }
 
 // 计算文件内容的 MD5 哈希

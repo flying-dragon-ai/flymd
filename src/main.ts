@@ -3890,6 +3890,8 @@ async function renderPreview() {
       preview.innerHTML = ''
       preview.appendChild(buf)
       try { decorateCodeBlocks(preview) } catch {}
+      // 便签模式：为待办项添加推送和提醒按钮
+      try { if (stickyNoteMode) { addStickyTodoButtons() } } catch {}
       // 预览更新后自动刷新大纲（节流由内部逻辑与渲染频率保障）
       try { renderOutlinePanel() } catch {}
     } catch {}
@@ -6757,6 +6759,109 @@ async function toggleStickyWindowOnTop(btn: HTMLButtonElement) {
     await win.setAlwaysOnTop(stickyNoteOnTop)
   } catch (e) {
     console.error('[便签模式] 设置置顶失败:', e)
+  }
+}
+
+// 便签模式：为待办项添加推送和提醒按钮
+function addStickyTodoButtons() {
+  try {
+    // 获取预览区所有待办项
+    const taskItems = preview.querySelectorAll('li.task-list-item') as NodeListOf<HTMLLIElement>
+    if (!taskItems || taskItems.length === 0) return
+
+    taskItems.forEach((item, index) => {
+      // 避免重复添加按钮
+      if (item.querySelector('.sticky-todo-actions')) return
+
+      // 获取待办项文本内容（去除复选框）
+      const checkbox = item.querySelector('input.task-list-item-checkbox') as HTMLInputElement | null
+      const itemText = item.textContent?.trim() || ''
+
+      // 创建按钮容器
+      const actionsDiv = document.createElement('span')
+      actionsDiv.className = 'sticky-todo-actions'
+
+      // 推送按钮
+      const pushBtn = document.createElement('button')
+      pushBtn.className = 'sticky-todo-btn sticky-todo-push-btn'
+      pushBtn.title = '推送到 xxtui'
+      pushBtn.innerHTML = '📤'
+      pushBtn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        await handleStickyTodoPush(itemText, index)
+      })
+
+      // 创建提醒按钮
+      const reminderBtn = document.createElement('button')
+      reminderBtn.className = 'sticky-todo-btn sticky-todo-reminder-btn'
+      reminderBtn.title = '创建提醒 (@时间)'
+      reminderBtn.innerHTML = '⏰'
+      reminderBtn.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        await handleStickyTodoReminder(itemText, index)
+      })
+
+      actionsDiv.appendChild(pushBtn)
+      actionsDiv.appendChild(reminderBtn)
+      item.appendChild(actionsDiv)
+    })
+  } catch (e) {
+    console.error('[便签模式] 添加待办按钮失败:', e)
+  }
+}
+
+// 处理便签模式待办项推送
+async function handleStickyTodoPush(todoText: string, index: number) {
+  try {
+    // 直接从 pluginAPIRegistry 获取 xxtui 插件 API
+    const record = pluginAPIRegistry.get('xxtui-todo-push')
+    if (!record || !record.api || !record.api.pushToXxtui) {
+      alert('xxtui 插件未安装或未启用\n\n请在"插件"菜单中启用 xxtui 插件')
+      return
+    }
+
+    const api = record.api
+
+    // 调用推送 API
+    const success = await api.pushToXxtui('[TODO]', todoText)
+    if (success) {
+      // 显示成功提示
+      pluginNotice('推送成功', 'ok', 2000)
+    } else {
+      alert('推送失败，请检查 xxtui 配置\n\n请在"插件"菜单 → "待办" → "设置"中配置 API Key')
+    }
+  } catch (e) {
+    console.error('[便签模式] 推送失败:', e)
+    alert('推送失败: ' + (e instanceof Error ? e.message : String(e)))
+  }
+}
+
+// 处理便签模式待办项创建提醒
+async function handleStickyTodoReminder(todoText: string, index: number) {
+  try {
+    // 直接从 pluginAPIRegistry 获取 xxtui 插件 API
+    const record = pluginAPIRegistry.get('xxtui-todo-push')
+    if (!record || !record.api || !record.api.parseAndCreateReminders) {
+      alert('xxtui 插件未安装或未启用\n\n请在"插件"菜单中启用 xxtui 插件')
+      return
+    }
+
+    const api = record.api
+
+    // 将单条待办文本包装成完整格式，以便插件解析
+    const todoMarkdown = `- [ ] ${todoText}`
+    const result = await api.parseAndCreateReminders(todoMarkdown)
+
+    if (result.success > 0) {
+      pluginNotice(`创建提醒成功: ${result.success} 条`, 'ok', 2000)
+    } else if (!todoText.includes('@')) {
+      alert('请在待办内容中添加 @时间 格式，例如：\n\n• 开会 @明天 下午3点\n• 写周报 @2025-11-21 09:00\n• 打电话 @2小时后')
+    } else {
+      alert('创建提醒失败，请检查时间格式')
+    }
+  } catch (e) {
+    console.error('[便签模式] 创建提醒失败:', e)
+    alert('创建提醒失败: ' + (e instanceof Error ? e.message : String(e)))
   }
 }
 

@@ -5452,16 +5452,18 @@ body.dark-mode .sticky-color-picker-container {
   padding: 0;
   background-clip: padding-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  opacity: 1 !important; /* 确保颜色按钮始终不透明 */
 }
 
 body.dark-mode .sticky-color-swatch {
   border-color: rgba(0, 0, 0, 0.6);
 }
 
-.sticky-color-swatch.white { background: #ffffff; }
-.sticky-color-swatch.gray { background: #e5e7eb; }
-.sticky-color-swatch.black { background: #111827; }
-.sticky-color-swatch.yellow { background: #facc15; }
+/* 颜色按钮显示完全不透明的颜色，不受便签透明度影响 */
+.sticky-color-swatch.white { background: #ffffff !important; }
+.sticky-color-swatch.gray { background: #e5e7eb !important; }
+.sticky-color-swatch.black { background: #111827 !important; }
+.sticky-color-swatch.yellow { background: #facc15 !important; }
 
 .sticky-color-swatch.active {
   outline: 2px solid #2563eb;

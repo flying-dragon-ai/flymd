@@ -6811,6 +6811,26 @@ function toggleStickyOpacitySlider(btn: HTMLButtonElement) {
 
   container.appendChild(label)
   container.appendChild(slider)
+
+  // 阻止面板内部点击事件冒泡到document
+  container.addEventListener('click', (e) => {
+    e.stopPropagation()
+  })
+
+  // 点击外部区域时关闭面板
+  const closePanel = (e: MouseEvent) => {
+    if (!container.contains(e.target as Node) && e.target !== btn) {
+      container.remove()
+      btn.classList.remove('active')
+      document.removeEventListener('click', closePanel)
+    }
+  }
+
+  // 延迟添加监听器,避免立即触发
+  setTimeout(() => {
+    document.addEventListener('click', closePanel)
+  }, 0)
+
   document.body.appendChild(container)
   btn.classList.add('active')
 }
@@ -6891,6 +6911,25 @@ function toggleStickyColorPicker(btn: HTMLButtonElement) {
     })
     container.appendChild(swatch)
   })
+
+  // 阻止面板内部点击事件冒泡到document
+  container.addEventListener('click', (e) => {
+    e.stopPropagation()
+  })
+
+  // 点击外部区域时关闭面板
+  const closePanel = (e: MouseEvent) => {
+    if (!container.contains(e.target as Node) && e.target !== btn) {
+      container.remove()
+      btn.classList.remove('active')
+      document.removeEventListener('click', closePanel)
+    }
+  }
+
+  // 延迟添加监听器,避免立即触发
+  setTimeout(() => {
+    document.addEventListener('click', closePanel)
+  }, 0)
 
   document.body.appendChild(container)
   btn.classList.add('active')

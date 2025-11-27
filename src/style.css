@@ -5435,8 +5435,10 @@ body.dark-mode .sticky-opacity-slider-container {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 10001;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  max-width: 142px; /* 限制最大宽度，确保每排5个 (18px * 5 + 8px * 4 + padding 20px) */
 }
 
 body.dark-mode .sticky-color-picker-container {
@@ -5473,6 +5475,7 @@ body.dark-mode .sticky-color-swatch {
 .sticky-color-swatch.sticky-color-green { background: #d1fae5 !important; }
 .sticky-color-swatch.sticky-color-orange { background: #fed7aa !important; }
 .sticky-color-swatch.sticky-color-purple { background: #e9d5ff !important; }
+.sticky-color-swatch.sticky-color-red { background: #fecaca !important; }
 
 .sticky-color-swatch.active {
   outline: 2px solid #2563eb;

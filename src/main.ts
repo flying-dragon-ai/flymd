@@ -39,6 +39,7 @@ import { openUrl, openPath } from '@tauri-apps/plugin-opener'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { appLocalDataDir } from '@tauri-apps/api/path'
 import fileTree, { FOLDER_ICONS, folderIconModal } from './fileTree'
 import { uploadImageToS3R2, type UploaderConfig } from './uploader/s3'
 import { transcodeToWebpIfNeeded } from './utils/image'
@@ -60,10 +61,17 @@ import { getUiZoom, setUiZoom, applyUiZoom, zoomIn, zoomOut, zoomReset, getPrevi
 
 type Mode = 'edit' | 'preview'
 type LibSortMode = 'name_asc' | 'name_desc' | 'mtime_asc' | 'mtime_desc'
-type StickyNoteColor = 'white' | 'gray' | 'black' | 'yellow' | 'pink' | 'blue' | 'green' | 'orange' | 'purple'
+type StickyNoteColor = 'white' | 'gray' | 'black' | 'yellow' | 'pink' | 'blue' | 'green' | 'orange' | 'purple' | 'red'
+type StickyNotePrefs = { opacity: number; color: StickyNoteColor }
 
 // 最近文件最多条数
 const RECENT_MAX = 5
+
+// 便签模式配置文件（仅存储颜色和透明度）
+const STICKY_NOTE_PREFS_FILE = 'flymd-sticky-note.json'
+const STICKY_NOTE_DEFAULT_OPACITY = 0.85
+const STICKY_NOTE_DEFAULT_COLOR: StickyNoteColor = 'white'
+const STICKY_NOTE_VALID_COLORS: StickyNoteColor[] = ['white', 'gray', 'black', 'yellow', 'pink', 'blue', 'green', 'orange', 'purple', 'red']
 
 // 渲染器（延迟初始化，首次进入预览时创建）
 let md: MarkdownIt | null = null
@@ -366,8 +374,8 @@ let stickyNoteMode = false
 let stickyNoteLocked = false   // 窗口位置锁定（禁止拖动）
 let stickyNoteOnTop = false    // 窗口置顶
 let stickyTodoAutoPreview = false // 便签快速待办编辑后是否需要自动返回阅读模式
-let stickyNoteOpacity = 0.85   // 窗口透明度
-let stickyNoteColor: StickyNoteColor = 'white'  // 便签背景色
+let stickyNoteOpacity = STICKY_NOTE_DEFAULT_OPACITY   // 窗口透明度
+let stickyNoteColor: StickyNoteColor = STICKY_NOTE_DEFAULT_COLOR  // 便签背景色
 // 边缘唤醒热区元素（非固定且隐藏时显示，鼠标靠近自动展开库）
 let _libEdgeEl: HTMLDivElement | null = null
 let _libFloatToggleEl: HTMLButtonElement | null = null
@@ -6778,6 +6786,83 @@ async function toggleStickyWindowOnTop(btn: HTMLButtonElement) {
   }
 }
 
+// 便签模式配置路径（优先使用应用数据目录，失败则退化为当前目录）
+async function getStickyNotePrefsPath(): Promise<string> {
+  try {
+    const dir = await appLocalDataDir()
+    if (dir && typeof dir === 'string') {
+      const sep = dir.includes('\\') ? '\\' : '/'
+      return dir.replace(/[\\/]+$/, '') + sep + STICKY_NOTE_PREFS_FILE
+    }
+  } catch {}
+  return STICKY_NOTE_PREFS_FILE
+}
+
+// 读取便签模式配置（颜色和透明度），带 Store 兼容回退
+async function loadStickyNotePrefs(): Promise<StickyNotePrefs> {
+  // 1) 首选：本地 JSON 配置文件
+  try {
+    const path = await getStickyNotePrefsPath()
+    const text = await readTextFileAnySafe(path)
+    if (text && text.trim()) {
+      const obj = JSON.parse(text) as any
+      const rawOpacity = typeof obj.opacity === 'number' ? obj.opacity : STICKY_NOTE_DEFAULT_OPACITY
+      const rawColor = typeof obj.color === 'string' ? obj.color : STICKY_NOTE_DEFAULT_COLOR
+      const opacity = Math.max(0, Math.min(1, rawOpacity))
+      const color = STICKY_NOTE_VALID_COLORS.includes(rawColor as StickyNoteColor)
+        ? (rawColor as StickyNoteColor)
+        : STICKY_NOTE_DEFAULT_COLOR
+      return { opacity, color }
+    }
+  } catch {}
+
+  // 2) 兼容旧版：从 Store 读取一次，并同步写入本地配置文件
+  try {
+    if (store) {
+      const savedOpacity = await store.get('stickyNoteOpacity') as number | null
+      const savedColor = await store.get('stickyNoteColor') as string | null
+      let opacity = STICKY_NOTE_DEFAULT_OPACITY
+      let color: StickyNoteColor = STICKY_NOTE_DEFAULT_COLOR
+      if (typeof savedOpacity === 'number' && Number.isFinite(savedOpacity)) {
+        opacity = Math.max(0, Math.min(1, savedOpacity))
+      }
+      if (savedColor && STICKY_NOTE_VALID_COLORS.includes(savedColor as StickyNoteColor)) {
+        color = savedColor as StickyNoteColor
+      }
+      const prefs: StickyNotePrefs = { opacity, color }
+      try { await saveStickyNotePrefs(prefs, true) } catch {}
+      return prefs
+    }
+  } catch {}
+
+  // 3) 默认值
+  return { opacity: STICKY_NOTE_DEFAULT_OPACITY, color: STICKY_NOTE_DEFAULT_COLOR }
+}
+
+// 保存便签模式配置到本地文件，并可选写回 Store（兼容旧版本）
+async function saveStickyNotePrefs(prefs: StickyNotePrefs, skipStore = false): Promise<void> {
+  const opacity = Math.max(0, Math.min(1, Number(prefs.opacity) || STICKY_NOTE_DEFAULT_OPACITY))
+  const color = STICKY_NOTE_VALID_COLORS.includes(prefs.color)
+    ? prefs.color
+    : STICKY_NOTE_DEFAULT_COLOR
+  const safe: StickyNotePrefs = { opacity, color }
+  try {
+    const path = await getStickyNotePrefsPath()
+    await writeTextFileAnySafe(path, JSON.stringify(safe))
+  } catch (e) {
+    console.warn('[便签模式] 保存便签配置文件失败:', e)
+  }
+  if (!skipStore && store) {
+    try {
+      await store.set('stickyNoteOpacity', safe.opacity)
+      await store.set('stickyNoteColor', safe.color)
+      await store.save()
+    } catch (e) {
+      console.warn('[便签模式] 保存便签配置到 Store 失败:', e)
+    }
+  }
+}
+
 // 切换透明度滑块显示
 function toggleStickyOpacitySlider(btn: HTMLButtonElement) {
   const existing = document.getElementById('sticky-opacity-slider-container')
@@ -6845,11 +6930,8 @@ async function setStickyNoteOpacity(opacity: number) {
   // 根据新的透明度更新文字样式
   updateStickyTextStyle(stickyNoteColor, stickyNoteOpacity)
 
-  // 持久化
-  if (store) {
-    await store.set('stickyNoteOpacity', stickyNoteOpacity)
-    await store.save()
-  }
+  // 持久化到本地配置文件（并兼容旧版 Store）
+  await saveStickyNotePrefs({ opacity: stickyNoteOpacity, color: stickyNoteColor })
 }
 
 // 便签颜色应用到 DOM（仅设置 CSS 变量，不做持久化）
@@ -6874,6 +6956,8 @@ function applyStickyNoteColorToDom(color: StickyNoteColor) {
     rgb = '254, 215, 170'         // 橙色
   } else if (color === 'purple') {
     rgb = '233, 213, 255'         // 紫色
+  } else if (color === 'red') {
+    rgb = '254, 202, 202'         // 红色
   }
   root.style.setProperty('--sticky-rgb', rgb)
   if (fg) root.style.setProperty('--sticky-fg', fg)
@@ -6911,10 +6995,7 @@ function updateStickyTextStyle(color: StickyNoteColor, opacity: number) {
 async function setStickyNoteColor(color: StickyNoteColor) {
   stickyNoteColor = color
   applyStickyNoteColorToDom(color)
-  if (store) {
-    await store.set('stickyNoteColor', color)
-    await store.save()
-  }
+  await saveStickyNotePrefs({ opacity: stickyNoteOpacity, color: stickyNoteColor })
 }
 
 // 切换颜色选择面板
@@ -6939,7 +7020,8 @@ function toggleStickyColorPicker(btn: HTMLButtonElement) {
     { key: 'blue', title: '蓝色' },
     { key: 'green', title: '绿色' },
     { key: 'orange', title: '橙色' },
-    { key: 'purple', title: '紫色' }
+    { key: 'purple', title: '紫色' },
+    { key: 'red', title: '红色' }
   ]
 
   colors.forEach(({ key, title }) => {
@@ -7314,21 +7396,11 @@ async function enterStickyNoteMode(filePath: string) {
     console.error('[便签模式] 调整窗口大小和位置失败:', e)
   }
 
-  // 8. 应用透明度设置
+  // 8. 应用透明度和颜色设置（从本地配置文件加载，兼容旧版 Store）
   try {
-    // 加载保存的透明度
-    if (store) {
-      const savedOpacity = await store.get('stickyNoteOpacity') as number | null
-      if (savedOpacity !== null && savedOpacity >= 0 && savedOpacity <= 1.0) {
-        stickyNoteOpacity = savedOpacity
-      }
-      const savedColor = await store.get('stickyNoteColor') as string | null
-      const validColors: StickyNoteColor[] = ['white', 'gray', 'black', 'yellow', 'pink', 'blue', 'green', 'orange', 'purple']
-      if (savedColor && validColors.includes(savedColor as StickyNoteColor)) {
-        stickyNoteColor = savedColor as StickyNoteColor
-      }
-    }
-    // 应用 CSS 变量
+    const prefs = await loadStickyNotePrefs()
+    stickyNoteOpacity = prefs.opacity
+    stickyNoteColor = prefs.color
     document.documentElement.style.setProperty('--sticky-opacity', String(stickyNoteOpacity))
     applyStickyNoteColorToDom(stickyNoteColor)
   } catch (e) {

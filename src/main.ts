@@ -364,6 +364,7 @@ let _focusTitlebarHideTimer: number | null = null
 let stickyNoteMode = false
 let stickyNoteLocked = false   // 窗口位置锁定（禁止拖动）
 let stickyNoteOnTop = false    // 窗口置顶
+let stickyTodoAutoPreview = false // 便签快速待办编辑后是否需要自动返回阅读模式
 // 边缘唤醒热区元素（非固定且隐藏时显示，鼠标靠近自动展开库）
 let _libEdgeEl: HTMLDivElement | null = null
 let _libFloatToggleEl: HTMLButtonElement | null = null
@@ -1837,6 +1838,21 @@ const filenameLabel = document.getElementById('filename') as HTMLDivElement
 // 任务列表：扫描与回写（阅读模式）
 let _taskMapLast: Array<{ line: number; ch: number }> = []
 let _taskEventsBound = false
+
+try {
+  // 便签快速待办：编辑框失焦或按下回车后自动返回阅读模式（仅在从阅读模式触发的待办插入场景生效）
+  editor.addEventListener('blur', () => {
+    if (!stickyNoteMode || !stickyTodoAutoPreview) return
+    void maybeAutoReturnStickyPreview()
+  })
+  editor.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (!stickyNoteMode || !stickyTodoAutoPreview) return
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      // 不干扰原有回车行为，只在事件后异步切回阅读模式
+      setTimeout(() => { void maybeAutoReturnStickyPreview() }, 0)
+    }
+  })
+} catch {}
 
 function scanTaskList(md: string): Array<{ line: number; ch: number }> {
   try {
@@ -6621,6 +6637,17 @@ function getStickyEditIcon(isEditing: boolean): string {
   </svg>`
 }
 
+// 在便签模式中根据需要自动返回阅读模式
+async function maybeAutoReturnStickyPreview() {
+  try {
+    if (!stickyNoteMode || !stickyTodoAutoPreview) return
+    stickyTodoAutoPreview = false
+    const btn = document.querySelector('.sticky-note-edit-btn') as HTMLButtonElement | null
+    if (!btn) return
+    await toggleStickyEditMode(btn)
+  } catch {}
+}
+
 // 在便签模式中在文末插入一行待办项 "- [ ] "
 async function addStickyTodoLine(editBtn: HTMLButtonElement) {
   try {
@@ -6630,10 +6657,16 @@ async function addStickyTodoLine(editBtn: HTMLButtonElement) {
       return
     }
 
+    // 记录插入前模式，用于决定是否自动返回阅读模式
+    const prevMode = mode
+
     // 确保处于编辑模式（必要时等价于用户点了一次“编辑”按钮）
     if (mode !== 'edit') {
       try { await toggleStickyEditMode(editBtn) } catch {}
     }
+
+    // 仅当从阅读模式切换过来时才开启自动返回阅读模式
+    stickyTodoAutoPreview = stickyNoteMode && prevMode === 'preview'
 
     const ta = editor as HTMLTextAreaElement | null
     if (!ta) return

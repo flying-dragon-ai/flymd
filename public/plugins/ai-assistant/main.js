@@ -42,6 +42,8 @@ let __AI_LAST_DOC_HASH__ = '' // 缓存上次渲染时的文档哈希，避免�
 let __AI_FN_DEBOUNCE_TIMER__ = null // 文档名观察者防抖定时器
 let __AI_CONTEXT__ = null // 保存插件 context，供消息操作按钮使用
 let __AI_PENDING_ACTION__ = null // 标记待办/提醒快捷模式
+let __AI_MD__ = null // Markdown 渲染器实例
+let __AI_HLJS__ = null // highlight.js 实例
 
 // ========== 工具函数 ==========
 async function loadCfg(context) {
@@ -117,6 +119,131 @@ function resolvePluginAsset(rel){
   return `plugins/ai-assistant/${clean}`
 }
 function isFreeProvider(cfg){ return !!cfg && cfg.provider === 'free' }
+
+// Markdown 渲染器（动态加载 markdown-it + highlight.js）
+async function ensureMarkdownRenderer() {
+  if (__AI_MD__) return __AI_MD__
+  try {
+    const [{ default: MarkdownIt }, hljs] = await Promise.all([
+      import('markdown-it'),
+      import('highlight.js')
+    ])
+    __AI_HLJS__ = hljs.default
+    __AI_MD__ = new MarkdownIt({
+      html: false,
+      linkify: true,
+      breaks: true,
+      highlight(code, lang) {
+        if (lang && __AI_HLJS__.getLanguage(lang)) {
+          try {
+            return __AI_HLJS__.highlight(code, { language: lang, ignoreIllegals: true }).value
+          } catch {}
+        }
+        // 转义 HTML 字符
+        return code.replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch] || ch))
+      }
+    })
+    return __AI_MD__
+  } catch (e) {
+    console.error('[AI助手] Markdown 渲染器加载失败：', e)
+    return null
+  }
+}
+
+// 渲染 Markdown 文本为 HTML
+async function renderMarkdownText(text) {
+  const md = await ensureMarkdownRenderer()
+  if (!md) return escapeHtml(text) // 降级为纯文本
+  try {
+    return md.render(text)
+  } catch {
+    return escapeHtml(text)
+  }
+}
+
+// HTML 转义
+function escapeHtml(str) {
+  return String(str || '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch] || ch))
+}
+
+// 网络请求重试机制（支持 429 限流和 5xx 服务器错误自动重试）
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  let lastError = null
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options)
+      // 429 限流 - 等待后重试
+      if (res.status === 429) {
+        const waitMs = Math.min(2000 * Math.pow(2, attempt), 10000)
+        console.warn(`[AI助手] 请求被限流(429)，${waitMs}ms 后重试...`)
+        await new Promise(r => setTimeout(r, waitMs))
+        continue
+      }
+      // 5xx 服务器错误 - 重试
+      if (res.status >= 500 && attempt < maxRetries - 1) {
+        const waitMs = 1000 * (attempt + 1)
+        console.warn(`[AI助手] 服务器错误(${res.status})，${waitMs}ms 后重试...`)
+        await new Promise(r => setTimeout(r, waitMs))
+        continue
+      }
+      return res
+    } catch (e) {
+      lastError = e
+      console.warn(`[AI助手] 请求失败(尝试 ${attempt + 1}/${maxRetries})：`, e.message || e)
+      if (attempt < maxRetries - 1) {
+        const waitMs = 1000 * (attempt + 1)
+        await new Promise(r => setTimeout(r, waitMs))
+      }
+    }
+  }
+  throw lastError || new Error('请求失败，已重试 ' + maxRetries + ' 次')
+}
+
+// 为代码块添加复制按钮
+function decorateAICodeBlocks(container) {
+  const pres = container.querySelectorAll('pre')
+  pres.forEach(pre => {
+    if (pre.dataset.aiDecorated) return
+    pre.dataset.aiDecorated = '1'
+    pre.style.position = 'relative'
+
+    // 提取语言标签
+    const code = pre.querySelector('code')
+    const langClass = code ? Array.from(code.classList).find(c => c.startsWith('language-') || c.startsWith('hljs')) : null
+    const lang = langClass ? langClass.replace(/^(language-|hljs\s*)/, '').toUpperCase() : ''
+
+    // 创建复制按钮
+    const btn = DOC().createElement('button')
+    btn.className = 'ai-code-copy'
+    btn.textContent = '复制'
+    btn.title = '复制代码'
+    btn.onclick = (e) => {
+      e.stopPropagation()
+      const codeText = code?.textContent || pre.textContent || ''
+      try {
+        navigator.clipboard?.writeText(codeText)
+        btn.textContent = '已复制'
+        btn.classList.add('copied')
+        setTimeout(() => {
+          btn.textContent = '复制'
+          btn.classList.remove('copied')
+        }, 1500)
+      } catch {}
+    }
+
+    // 如果有语言标签，添加语言角标
+    if (lang && lang !== 'HLJS') {
+      const langLabel = DOC().createElement('span')
+      langLabel.className = 'ai-code-lang'
+      langLabel.textContent = lang
+      pre.appendChild(langLabel)
+    }
+
+    pre.appendChild(btn)
+  })
+}
 function normalizeFreeModelKey(key){
   const raw = String(key || '').trim().toLowerCase()
   if (raw && Object.prototype.hasOwnProperty.call(FREE_MODEL_OPTIONS, raw)) return raw
@@ -497,6 +624,70 @@ function ensureCss() {
     '#ai-send:hover{color:#3b82f6}',
     '#ai-assist-win.dark #ai-send{color:#6b7280}',
     '#ai-assist-win.dark #ai-send:hover{color:#60a5fa}',
+    // ========== 新增：动画效果 ==========
+    // 消息入场动画
+    '@keyframes ai-msg-slide-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}',
+    '.msg-wrapper{animation:ai-msg-slide-in 250ms cubic-bezier(0.4,0,0.2,1)}',
+    // 窗口过渡动画
+    '#ai-assist-win{transition:opacity 200ms ease-out,transform 200ms ease-out}',
+    '#ai-assist-win.ai-win-hidden{opacity:0;transform:scale(0.96);pointer-events:none}',
+    // 思考中动画（三点脉冲）
+    '.ai-thinking{display:flex;align-items:center;gap:6px;padding:12px 14px}',
+    '.ai-thinking-dot{width:8px;height:8px;background:var(--muted,#9ca3af);border-radius:50%;animation:ai-dot-pulse 1.4s ease-in-out infinite}',
+    '.ai-thinking-dot:nth-child(2){animation-delay:0.2s}',
+    '.ai-thinking-dot:nth-child(3){animation-delay:0.4s}',
+    '@keyframes ai-dot-pulse{0%,80%,100%{transform:scale(0.6);opacity:0.5}40%{transform:scale(1);opacity:1}}',
+    '#ai-assist-win.dark .ai-thinking-dot{background:var(--muted,#6b7280)}',
+    // ========== 新增：Markdown 内容样式 ==========
+    '.msg.a .ai-md-content{white-space:normal;line-height:1.6}',
+    '.msg.a .ai-md-content p{margin:0 0 0.8em 0}',
+    '.msg.a .ai-md-content p:last-child{margin-bottom:0}',
+    '.msg.a .ai-md-content ul,.msg.a .ai-md-content ol{margin:0.5em 0;padding-left:1.5em}',
+    '.msg.a .ai-md-content li{margin:0.3em 0}',
+    '.msg.a .ai-md-content h1,.msg.a .ai-md-content h2,.msg.a .ai-md-content h3,.msg.a .ai-md-content h4{margin:0.8em 0 0.4em 0;font-weight:600}',
+    '.msg.a .ai-md-content h1{font-size:1.3em}',
+    '.msg.a .ai-md-content h2{font-size:1.2em}',
+    '.msg.a .ai-md-content h3{font-size:1.1em}',
+    '.msg.a .ai-md-content blockquote{margin:0.5em 0;padding:0.5em 1em;border-left:3px solid var(--border,#e5e7eb);background:var(--panel-bg,#f3f4f6);border-radius:4px}',
+    '#ai-assist-win.dark .msg.a .ai-md-content blockquote{border-left-color:var(--border,#374151);background:var(--panel-bg,#1f2937)}',
+    '.msg.a .ai-md-content a{color:#2563eb;text-decoration:none}',
+    '.msg.a .ai-md-content a:hover{text-decoration:underline}',
+    '#ai-assist-win.dark .msg.a .ai-md-content a{color:#60a5fa}',
+    '.msg.a .ai-md-content code{background:var(--code-bg,#f6f8fa);padding:0.15em 0.4em;border-radius:4px;font-size:0.9em;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}',
+    '#ai-assist-win.dark .msg.a .ai-md-content code{background:var(--code-bg,#1f2937)}',
+    '.msg.a .ai-md-content hr{border:none;border-top:1px solid var(--border,#e5e7eb);margin:1em 0}',
+    '#ai-assist-win.dark .msg.a .ai-md-content hr{border-top-color:var(--border,#374151)}',
+    // ========== 新增：代码块样式 ==========
+    '.msg.a .ai-md-content pre{position:relative;background:var(--code-bg,#f6f8fa);border:1px solid var(--border,#e5e7eb);border-radius:8px;padding:12px 14px;margin:0.8em 0;overflow-x:auto}',
+    '.msg.a .ai-md-content pre code{background:transparent;padding:0;font-size:13px;line-height:1.5}',
+    '#ai-assist-win.dark .msg.a .ai-md-content pre{background:var(--code-bg,#111827);border-color:var(--border,#374151)}',
+    // 代码块复制按钮
+    '.ai-code-copy{position:absolute;top:8px;right:8px;padding:4px 8px;font-size:11px;color:var(--muted,#6b7280);background:var(--bg,#fff);border:1px solid var(--border,#e5e7eb);border-radius:4px;cursor:pointer;opacity:0;transition:all 0.15s}',
+    '.msg.a .ai-md-content pre:hover .ai-code-copy{opacity:1}',
+    '.ai-code-copy:hover{color:var(--fg,#0f172a);background:var(--panel-bg,#f3f4f6)}',
+    '.ai-code-copy.copied{color:#10b981;border-color:#10b981}',
+    '#ai-assist-win.dark .ai-code-copy{background:var(--bg,#0f172a);border-color:var(--border,#374151);color:var(--muted,#9ca3af)}',
+    '#ai-assist-win.dark .ai-code-copy:hover{color:var(--fg,#e5e7eb);background:var(--panel-bg,#1f2937)}',
+    // 代码块语言标签
+    '.ai-code-lang{position:absolute;top:8px;left:12px;font-size:10px;color:var(--muted,#9ca3af);text-transform:uppercase;letter-spacing:0.5px}',
+    '#ai-assist-win.dark .ai-code-lang{color:var(--muted,#6b7280)}',
+    // highlight.js 主题适配
+    '.msg.a .ai-md-content .hljs{color:var(--fg,#24292e)}',
+    '.msg.a .ai-md-content .hljs-comment,.msg.a .ai-md-content .hljs-quote{color:#6a737d}',
+    '.msg.a .ai-md-content .hljs-keyword,.msg.a .ai-md-content .hljs-selector-tag{color:#d73a49}',
+    '.msg.a .ai-md-content .hljs-string,.msg.a .ai-md-content .hljs-addition{color:#22863a}',
+    '.msg.a .ai-md-content .hljs-number,.msg.a .ai-md-content .hljs-literal{color:#005cc5}',
+    '.msg.a .ai-md-content .hljs-built_in,.msg.a .ai-md-content .hljs-type{color:#6f42c1}',
+    '.msg.a .ai-md-content .hljs-attr,.msg.a .ai-md-content .hljs-variable{color:#e36209}',
+    '.msg.a .ai-md-content .hljs-title,.msg.a .ai-md-content .hljs-function{color:#6f42c1}',
+    '#ai-assist-win.dark .msg.a .ai-md-content .hljs{color:#e5e7eb}',
+    '#ai-assist-win.dark .msg.a .ai-md-content .hljs-comment,#ai-assist-win.dark .msg.a .ai-md-content .hljs-quote{color:#8b949e}',
+    '#ai-assist-win.dark .msg.a .ai-md-content .hljs-keyword,#ai-assist-win.dark .msg.a .ai-md-content .hljs-selector-tag{color:#ff7b72}',
+    '#ai-assist-win.dark .msg.a .ai-md-content .hljs-string,#ai-assist-win.dark .msg.a .ai-md-content .hljs-addition{color:#7ee787}',
+    '#ai-assist-win.dark .msg.a .ai-md-content .hljs-number,#ai-assist-win.dark .msg.a .ai-md-content .hljs-literal{color:#79c0ff}',
+    '#ai-assist-win.dark .msg.a .ai-md-content .hljs-built_in,#ai-assist-win.dark .msg.a .ai-md-content .hljs-type{color:#d2a8ff}',
+    '#ai-assist-win.dark .msg.a .ai-md-content .hljs-attr,#ai-assist-win.dark .msg.a .ai-md-content .hljs-variable{color:#ffa657}',
+    '#ai-assist-win.dark .msg.a .ai-md-content .hljs-title,#ai-assist-win.dark .msg.a .ai-md-content .hljs-function{color:#d2a8ff}',
   ].join('\n')
   DOC().head.appendChild(css)
 }
@@ -573,7 +764,29 @@ function renderMsgs(root) {
     // 创建消息气泡
     const d = DOC().createElement('div')
     d.className = 'msg ' + (m.role === 'user' ? 'u' : 'a')
-    d.textContent = String(m.content || '')
+
+    // AI 消息使用 Markdown 渲染
+    if (m.role === 'assistant' && m.content) {
+      // 先显示纯文本（防止闪烁）
+      d.textContent = String(m.content || '')
+      // 异步渲染 Markdown
+      ;(async () => {
+        try {
+          const html = await renderMarkdownText(String(m.content || ''))
+          if (html) {
+            const mdWrapper = DOC().createElement('div')
+            mdWrapper.className = 'ai-md-content'
+            mdWrapper.innerHTML = html
+            d.textContent = ''
+            d.appendChild(mdWrapper)
+            // 装饰代码块（添加复制按钮）
+            decorateAICodeBlocks(d)
+          }
+        } catch {}
+      })()
+    } else {
+      d.textContent = String(m.content || '')
+    }
     contentWrapper.appendChild(d)
 
     wrapper.appendChild(contentWrapper)
@@ -1358,12 +1571,42 @@ async function mountWindow(context){
 
 async function toggleWindow(context){
   if (__AI_TOGGLE_LOCK__) return
-  __AI_TOGGLE_LOCK__ = true; setTimeout(() => { __AI_TOGGLE_LOCK__ = false }, 250)
+  __AI_TOGGLE_LOCK__ = true; setTimeout(() => { __AI_TOGGLE_LOCK__ = false }, 300)
   let el = elById('ai-assist-win')
-  if (!el) { el = await mountWindow(context); el.style.display = 'block'; setDockPush(true); await ensureSessionForDoc(context); await refreshHeader(context); return }
-  const visible = (() => { try { return WIN().getComputedStyle(el).display !== 'none' } catch { return el.style.display !== 'none' } })()
-  el.style.display = visible ? 'none' : 'block'
-  if (!visible) { setDockPush(true); await ensureSessionForDoc(context); await refreshHeader(context) } else { setDockPush(false) }
+  if (!el) {
+    // 首次创建窗口：先隐藏，然后显示（带动画）
+    el = await mountWindow(context)
+    el.style.display = 'block'
+    el.classList.add('ai-win-hidden')
+    // 强制重绘以触发动画
+    void el.offsetHeight
+    el.classList.remove('ai-win-hidden')
+    setDockPush(true)
+    await ensureSessionForDoc(context)
+    await refreshHeader(context)
+    return
+  }
+  const isHidden = el.classList.contains('ai-win-hidden') || el.style.display === 'none'
+  if (isHidden) {
+    // 显示窗口（带动画）
+    el.style.display = 'block'
+    el.classList.add('ai-win-hidden')
+    void el.offsetHeight
+    el.classList.remove('ai-win-hidden')
+    setDockPush(true)
+    await ensureSessionForDoc(context)
+    await refreshHeader(context)
+  } else {
+    // 隐藏窗口（带动画）
+    el.classList.add('ai-win-hidden')
+    setDockPush(false)
+    // 动画结束后隐藏元素
+    setTimeout(() => {
+      if (el.classList.contains('ai-win-hidden')) {
+        el.style.display = 'none'
+      }
+    }, 200)
+  }
 }
 
 async function toggleWinSizePreset(context, el){
@@ -2022,13 +2265,34 @@ async function sendFromInputWithAction(context){
       const headers = buildApiHeaders(cfg)
 
     const chatEl = el('ai-chat')
-    const draft = document.createElement('div'); draft.className = 'msg a'; draft.textContent = ''
-    chatEl.appendChild(draft); chatEl.scrollTop = chatEl.scrollHeight
+
+    // 显示思考中动画
+    const thinkingWrapper = document.createElement('div')
+    thinkingWrapper.className = 'msg-wrapper'
+    thinkingWrapper.id = 'ai-thinking-indicator'
+    const thinkingBubble = document.createElement('div')
+    thinkingBubble.className = 'msg a ai-thinking'
+    thinkingBubble.innerHTML = '<span class="ai-thinking-dot"></span><span class="ai-thinking-dot"></span><span class="ai-thinking-dot"></span>'
+    thinkingWrapper.appendChild(thinkingBubble)
+    chatEl.appendChild(thinkingWrapper)
+    chatEl.scrollTop = chatEl.scrollHeight
+
+    // 创建回复草稿元素（初始隐藏）
+    const draft = document.createElement('div'); draft.className = 'msg a'; draft.textContent = ''; draft.style.display = 'none'
+    chatEl.appendChild(draft)
 
       let finalText = ''
+      // 移除思考中动画的辅助函数
+      const removeThinking = () => {
+        const indicator = el('ai-thinking-indicator')
+        if (indicator) indicator.remove()
+        draft.style.display = ''
+      }
+
       if (isFree) {
         // 免费代理模式：直接走非流式一次性请求，由后端持有真实 Key
-        const r = await fetch(url, { method:'POST', headers, body: JSON.stringify({ ...bodyObj, stream: false }) })
+        const r = await fetchWithRetry(url, { method:'POST', headers, body: JSON.stringify({ ...bodyObj, stream: false }) })
+        removeThinking()
         const text = await r.text()
         const data = text ? JSON.parse(text) : null
         finalText = data?.choices?.[0]?.message?.content || ''
@@ -2036,8 +2300,9 @@ async function sendFromInputWithAction(context){
       } else {
         // 首选用原生 fetch 进行流式解析（SSE）
         const body = JSON.stringify(bodyObj)
+        let firstChunkReceived = false
         try {
-          const r2 = await fetch(url, { method:'POST', headers, body })
+          const r2 = await fetchWithRetry(url, { method:'POST', headers, body })
           if (!r2.ok || !r2.body) { throw new Error('HTTP ' + r2.status) }
           const reader = r2.body.getReader()
           const decoder = new TextDecoder('utf-8')
@@ -2060,7 +2325,14 @@ async function sendFromInputWithAction(context){
                 try {
                   const j = JSON.parse(payload)
                   const delta = j?.choices?.[0]?.delta?.content || ''
-                  if (delta) { finalText += delta; draft.textContent = finalText; chatEl.scrollTop = chatEl.scrollHeight }
+                  if (delta) {
+                    // 收到第一个内容时移除思考中动画
+                    if (!firstChunkReceived) {
+                      firstChunkReceived = true
+                      removeThinking()
+                    }
+                    finalText += delta; draft.textContent = finalText; chatEl.scrollTop = chatEl.scrollHeight
+                  }
                 } catch {}
               }
             }
@@ -2068,13 +2340,17 @@ async function sendFromInputWithAction(context){
         } catch (e) {
           // 流式失败兜底：改非流式一次性请求
           try {
-            const r3 = await fetch(url, { method:'POST', headers, body: JSON.stringify({ ...bodyObj, stream: false }) })
+            const r3 = await fetchWithRetry(url, { method:'POST', headers, body: JSON.stringify({ ...bodyObj, stream: false }) })
+            removeThinking()
             const text = await r3.text()
             const data = text ? JSON.parse(text) : null
             const ctt = data?.choices?.[0]?.message?.content || ''
             finalText = ctt
             draft.textContent = finalText
-          } catch (e2) { throw e2 }
+          } catch (e2) {
+            removeThinking() // 确保错误时也移除
+            throw e2
+          }
         }
       }
 

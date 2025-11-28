@@ -40,22 +40,21 @@ WebSocket 地址示例：
 - `ws://127.0.0.1:3456/ws`
 
 ## 反向代理
-```
-# 统一代理 /server/ 下的 HTTP 请求（health、plugin 等）
-location /server/ {
+
+```nginx
+# 统一代理 / 下的 HTTP 请求（health 等）
+location / {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-    # 注意后面这个斜杠：把 /server/ 前缀去掉后转发给 127.0.0.1:3456
     proxy_pass http://127.0.0.1:3456/;
 }
 
-# 单独给 WebSocket /server/ws 做升级
-location /server/ws {
+# 单独给 WebSocket /ws 做升级
+location /ws {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -63,10 +62,9 @@ location /server/ws {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 
-    # 把 /server/ws 映射到后端的 /ws（server.js 只认 /ws）
+    # 将外部的 /ws 请求转发到后端 Node 进程的 /ws（OSserver 只认 /ws）
     proxy_pass http://127.0.0.1:3456/ws;
 }
-
 ```
 
 ## 协议说明（与内置闭源版保持兼容）
@@ -104,8 +102,7 @@ ws://127.0.0.1:3456/ws?room=demo&password=123456&name=fly
 
 ## 搭配协同插件使用
 
-在 `public/plugins` 目录下，：
-
+前往扩展市场安装
 
 
 插件配置面板中需要填写：
@@ -120,5 +117,4 @@ ws://127.0.0.1:3456/ws?room=demo&password=123456&name=fly
 ## 注意事项
 
 - 所有房间信息与内容仅保存在内存中，**重启进程后会全部丢失**。
-- 未做账号体系和付费逻辑，仅按 `room + password` 区分空间。
-
+- 未做账号体系，仅按 `room + password` 区分空间。

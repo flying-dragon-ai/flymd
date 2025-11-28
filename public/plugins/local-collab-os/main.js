@@ -93,13 +93,7 @@ function getBlockInfo(content, pos) {
   const blockText = text.slice(start, end)
   const firstLine = blockText.split(/\r?\n/)[0] || ''
   const labelBase = firstLine.trim() || blockText.trim().slice(0, 30) || `第${blockIndex + 1}段`
-  let h = 2166136261 >>> 0
-  const keyBase = `${blockIndex}|${labelBase}`
-  for (let i = 0; i < keyBase.length; i++) {
-    h ^= keyBase.charCodeAt(i)
-    h = Math.imul(h, 16777619) >>> 0
-  }
-  const id = 'b_' + h.toString(16)
+  const id = 'b_' + String(blockIndex >>> 0)
   return { id, label: labelBase.slice(0, 32), start, end }
 }
 

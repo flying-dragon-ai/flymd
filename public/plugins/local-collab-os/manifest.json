@@ -1,7 +1,7 @@
 {
   "id": "local-collab-os",
   "name": "协同编辑（开源服务器）",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "flyMD",
   "description": "连接协同服务器的简单多人协同插件",
   "main": "main.js"

@@ -62,6 +62,9 @@ body {
 }
 
 #app {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* 防止内容溢出影响布局 */
   animation: app-fadein 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -160,6 +163,8 @@ body {
 
 .titlebar {
   height: 36px;
+  min-height: 36px; /* 防止被压缩 */
+  flex-shrink: 0; /* 防止在flex布局中被压缩 */
   display: flex;
   align-items: stretch;
   border-bottom: 1px solid var(--border);
@@ -440,7 +445,10 @@ body {
   --ai-right: 300px;
   --workspace-left-gap: calc(var(--gap-left-library) + var(--ai-left-gap));
   --workspace-right-gap: calc(var(--gap-right-library) + var(--ai-right-gap));
+  flex: 1; /* 在flex布局中填充剩余空间 */
+  min-height: 0; /* 允许flex子元素正确收缩和滚动 */
   height: calc(100% - 36px);
+  overflow: hidden; /* 防止内容溢出影响外部布局 */
   position: relative;
   background: var(--bg);
 }
@@ -465,6 +473,8 @@ body {
 .editor {
   width: 100%; height: 100%;
   border: none; outline: none; resize: none;
+  overflow-y: auto; /* 确保内容超出时显示滚动条 */
+  overflow-x: hidden; /* 隐藏横向滚动条 */
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
   font-size: 14px; line-height: 1.7; color: var(--fg);
   background: var(--bg);
@@ -481,6 +491,8 @@ body {
   margin-left: auto;
   margin-right: auto;
   box-sizing: content-box;
+  /* 使用content-box时，高度需要减去上下padding（20px + 40px = 60px） */
+  height: calc(100% - 60px);
   width: min(
     var(--preview-max-width, 860px),
     max(0px, calc(100% - var(--workspace-left-gap, 0px) - var(--workspace-right-gap, 0px)))
@@ -5040,6 +5052,11 @@ body.focus-mode.custom-titlebar-active .focus-trigger-zone {
 /* ========================================
    多标签栏样式
    ======================================== */
+
+/* 标签栏容器：防止被flex布局压缩 */
+#tabbar-container {
+  flex-shrink: 0;
+}
 
 .tabbar {
   display: flex;

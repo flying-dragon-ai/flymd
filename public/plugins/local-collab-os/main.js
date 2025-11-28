@@ -36,6 +36,8 @@ let __COLLAB_LOCK_PANEL_EL__ = null
 let __COLLAB_PEERS__ = []
 let __COLLAB_LOCK_IDLE_TIMER__ = null
 const LOCK_IDLE_TIMEOUT_MS = 2000
+const REMOTE_APPLY_QUIET_MS = 800
+let __COLLAB_LAST_TYPED_AT__ = 0
 
 function getEditorElement() {
   try {
@@ -490,6 +492,11 @@ async function startCollab(context, cfg) {
         // 本地已有新内容尚未同步，跳过这次远程更新
         return
       }
+      const now = Date.now()
+      if (__COLLAB_LAST_TYPED_AT__ && now - __COLLAB_LAST_TYPED_AT__ < REMOTE_APPLY_QUIET_MS) {
+        // 本地刚刚有输入，暂缓应用远程更新以避免抢走光标
+        return
+      }
       __COLLAB_APPLYING_REMOTE__ = true
       try {
         context.setEditorValue(msg.content)
@@ -736,6 +743,7 @@ function bindLockGuards(context) {
       if (!isConnected() || !__COLLAB_CFG__ || !__COLLAB_DOC_ACTIVE__) return
       const ta = e.target
       if (!ta || ta !== editorEl) return
+      __COLLAB_LAST_TYPED_AT__ = Date.now()
       const content = String(context.getEditorValue() || '')
       const pos = ta.selectionStart >>> 0
       const info = getBlockInfo(content, pos)
@@ -855,4 +863,3 @@ export async function openSettings(context) {
   await saveCfg(context, nextCfg)
   context.ui.notice('协同插件配置已保存', 'ok', 2000)
 }
-

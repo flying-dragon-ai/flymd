@@ -9575,7 +9575,9 @@ function bindEvents() {
   })
   editor.addEventListener('keyup', refreshStatus)
   editor.addEventListener('click', refreshStatus)
-  // 粘贴到编辑器：优先将 HTML 转译为 Markdown；其次处理图片文件占位+异步上传；否则走默认粘贴
+  // 粘贴到编辑器：
+  // - Ctrl+Shift+V：始终按纯文本粘贴（忽略 HTML/图片等富文本信息）
+  // - 普通 Ctrl+V：优先将 HTML 转译为 Markdown；其次处理图片文件占位+异步上传；否则走默认粘贴
   editor.addEventListener('paste', guard(async (e: ClipboardEvent) => {
     try {
       const dt = e.clipboardData
@@ -9590,6 +9592,18 @@ function bindEvents() {
       const pasteCombo = _lastPasteCombo
       // 使用一次即清空，避免状态污染后续粘贴
       _lastPasteCombo = null
+
+      // 0) Ctrl+Shift+V：强制走"纯文本粘贴"路径，完全忽略 HTML / 图片 等富文本
+      if (pasteCombo === 'plain') {
+        try {
+          e.preventDefault()
+          if (plainText) {
+            insertAtCursor(plainText)
+            if (mode === 'preview') await renderPreview(); else if (wysiwyg) scheduleWysiwygRender()
+          }
+        } catch {}
+        return
+      }
 
       // 1) 处理 HTML → Markdown（像 Typora 那样保留格式）
       try {

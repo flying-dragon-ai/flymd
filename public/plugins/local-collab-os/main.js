@@ -5,6 +5,11 @@
 
 const CFG_KEY = 'local-collab-os.config'
 
+// 官方协同服务器预设
+const OFFICIAL_SERVER_URL = 'wss://t.hast.one/server/ws'
+const OFFICIAL_ROOM_CODE = 'flymd'
+const OFFICIAL_PASSWORD = '(l^2Bm:8@0'
+
 const DEFAULT_CFG = {
   serverUrl: '',
   roomCode: '',
@@ -12,7 +17,11 @@ const DEFAULT_CFG = {
   displayName: '',
   syncIntervalMs: 1000,
   boundDocId: '',
-  boundDocTitle: ''
+  boundDocTitle: '',
+  serverMode: 'custom',
+  customServerUrl: '',
+  customRoomCode: '',
+  customPassword: ''
 }
 
 let __COLLAB_CTX__ = null
@@ -39,6 +48,11 @@ const LOCK_IDLE_TIMEOUT_MS = 2000
 const REMOTE_APPLY_QUIET_MS = 800
 let __COLLAB_LAST_TYPED_AT__ = 0
 let __COLLAB_EDITOR_PREV_CARET_COLOR__ = ''
+let __COLLAB_LOCAL_CARET_EL__ = null
+let __COLLAB_LOCAL_CARET_CHAR_WIDTH__ = 0
+let __COLLAB_LOCAL_CARET_LINE_HEIGHT__ = 0
+let __COLLAB_OFFICIAL_PROBE_WS__ = null
+let __COLLAB_OFFICIAL_PROBE_TIMER__ = null
 
 function getEditorElement() {
   try {
@@ -58,13 +72,240 @@ function applyEditorCaretColor(enabled) {
       }
     } catch {}
     try {
-      el.style.caretColor = __COLLAB_MY_COLOR__ || el.style.caretColor || ''
+      // 协同模式下隐藏原生插入符，由本插件用 JS 绘制粗色条光标
+      el.style.caretColor = 'transparent'
     } catch {}
   } else {
     try {
       el.style.caretColor = __COLLAB_EDITOR_PREV_CARET_COLOR__ || ''
     } catch {}
   }
+}
+
+function updateLocalCaretVisual() {
+  const editorEl = getEditorElement()
+  if (!editorEl || typeof editorEl.selectionStart !== 'number') {
+    hideLocalCaret()
+    return
+  }
+  if (!isConnected() || !__COLLAB_CFG__ || !__COLLAB_DOC_ACTIVE__) {
+    hideLocalCaret()
+    return
+  }
+  try {
+    const cs = window.getComputedStyle(editorEl)
+    if (cs.display === 'none' || cs.visibility === 'hidden') {
+      hideLocalCaret()
+      return
+    }
+  } catch {
+    // 忽略样式计算失败
+  }
+
+  ensureLocalCaretMetrics(editorEl)
+  if (!__COLLAB_LOCAL_CARET_CHAR_WIDTH__ || !__COLLAB_LOCAL_CARET_LINE_HEIGHT__) {
+    hideLocalCaret()
+    return
+  }
+
+  let text = ''
+  try {
+    text = String(editorEl.value || '')
+  } catch {
+    hideLocalCaret()
+    return
+  }
+  let pos = editorEl.selectionStart >>> 0
+  if (pos < 0) pos = 0
+  if (pos > text.length) pos = text.length
+
+  let line = 0
+  let col = 0
+  for (let i = 0; i < pos; i++) {
+    const ch = text.charCodeAt(i)
+    if (ch === 10) {
+      line++
+      col = 0
+    } else {
+      col++
+    }
+  }
+
+  let rect
+  let padLeft = 0
+  let padTop = 0
+  try {
+    rect = editorEl.getBoundingClientRect()
+    const cs = window.getComputedStyle(editorEl)
+    padLeft = parseFloat(cs.paddingLeft) || 0
+    padTop = parseFloat(cs.paddingTop) || 0
+  } catch {
+    hideLocalCaret()
+    return
+  }
+
+  const scrollY = window.scrollY || window.pageYOffset || 0
+  const scrollX = window.scrollX || window.pageXOffset || 0
+  const top =
+    rect.top +
+    scrollY +
+    padTop +
+    line * __COLLAB_LOCAL_CARET_LINE_HEIGHT__ -
+    editorEl.scrollTop
+  const left =
+    rect.left +
+    scrollX +
+    padLeft +
+    col * __COLLAB_LOCAL_CARET_CHAR_WIDTH__ -
+    editorEl.scrollLeft
+
+  const caretEl = ensureLocalCaretEl()
+  if (!caretEl) return
+  try {
+    caretEl.style.height = __COLLAB_LOCAL_CARET_LINE_HEIGHT__ + 'px'
+    caretEl.style.left = left + 'px'
+    caretEl.style.top = top + 'px'
+    caretEl.style.background = __COLLAB_MY_COLOR__ || '#ff1744'
+    caretEl.style.display = 'block'
+  } catch {}
+}
+
+function ensureLocalCaretEl() {
+  const doc = (typeof document !== 'undefined' && document) || null
+  if (!doc) return null
+  if (__COLLAB_LOCAL_CARET_EL__) return __COLLAB_LOCAL_CARET_EL__
+  const el = doc.createElement('div')
+  el.id = 'local-collab-caret'
+  el.style.position = 'absolute'
+  el.style.pointerEvents = 'none'
+  el.style.zIndex = '1200'
+  el.style.width = '2px'
+  el.style.borderRadius = '1px'
+  el.style.background = __COLLAB_MY_COLOR__ || '#ff1744'
+  el.style.display = 'none'
+  el.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.18)'
+  doc.body.appendChild(el)
+  __COLLAB_LOCAL_CARET_EL__ = el
+  return el
+}
+
+function hideLocalCaret() {
+  const el = __COLLAB_LOCAL_CARET_EL__
+  if (!el) return
+  try {
+    el.style.display = 'none'
+  } catch {}
+}
+
+function ensureLocalCaretMetrics(editorEl) {
+  if (!editorEl) return
+  try {
+    const cs = window.getComputedStyle(editorEl)
+    if (!__COLLAB_LOCAL_CARET_CHAR_WIDTH__ || !__COLLAB_LOCAL_CARET_LINE_HEIGHT__) {
+      const doc = editorEl.ownerDocument || document
+      const span = doc.createElement('span')
+      span.textContent = 'Ｍ'
+      span.style.position = 'absolute'
+      span.style.visibility = 'hidden'
+      span.style.whiteSpace = 'pre'
+      span.style.fontFamily = cs.fontFamily
+      span.style.fontSize = cs.fontSize
+      doc.body.appendChild(span)
+      const rect = span.getBoundingClientRect()
+      __COLLAB_LOCAL_CARET_CHAR_WIDTH__ = rect.width || 8
+      const lh = parseFloat(cs.lineHeight)
+      __COLLAB_LOCAL_CARET_LINE_HEIGHT__ = lh || rect.height || 18
+      doc.body.removeChild(span)
+    }
+  } catch {}
+}
+
+function updateLocalCaretVisual() {
+  const editorEl = getEditorElement()
+  if (!editorEl || typeof editorEl.selectionStart !== 'number') {
+    hideLocalCaret()
+    return
+  }
+  if (!isConnected() || !__COLLAB_CFG__ || !__COLLAB_DOC_ACTIVE__) {
+    hideLocalCaret()
+    return
+  }
+  try {
+    const cs = window.getComputedStyle(editorEl)
+    if (cs.display === 'none' || cs.visibility === 'hidden') {
+      hideLocalCaret()
+      return
+    }
+  } catch {
+    // 忽略样式计算失败
+  }
+
+  ensureLocalCaretMetrics(editorEl)
+  if (!__COLLAB_LOCAL_CARET_CHAR_WIDTH__ || !__COLLAB_LOCAL_CARET_LINE_HEIGHT__) {
+    hideLocalCaret()
+    return
+  }
+
+  let text = ''
+  try {
+    text = String(editorEl.value || '')
+  } catch {
+    hideLocalCaret()
+    return
+  }
+  let pos = editorEl.selectionStart >>> 0
+  if (pos < 0) pos = 0
+  if (pos > text.length) pos = text.length
+
+  let line = 0
+  let col = 0
+  for (let i = 0; i < pos; i++) {
+    const ch = text.charCodeAt(i)
+    if (ch === 10) {
+      line++
+      col = 0
+    } else {
+      col++
+    }
+  }
+
+  let rect
+  let padLeft = 0
+  let padTop = 0
+  try {
+    rect = editorEl.getBoundingClientRect()
+    const cs = window.getComputedStyle(editorEl)
+    padLeft = parseFloat(cs.paddingLeft) || 0
+    padTop = parseFloat(cs.paddingTop) || 0
+  } catch {
+    hideLocalCaret()
+    return
+  }
+
+  const scrollY = window.scrollY || window.pageYOffset || 0
+  const scrollX = window.scrollX || window.pageXOffset || 0
+  const top =
+    rect.top +
+    scrollY +
+    padTop +
+    line * __COLLAB_LOCAL_CARET_LINE_HEIGHT__ -
+    editorEl.scrollTop
+  const left =
+    rect.left +
+    scrollX +
+    padLeft +
+    col * __COLLAB_LOCAL_CARET_CHAR_WIDTH__ -
+    editorEl.scrollLeft
+
+  const caretEl = ensureLocalCaretEl()
+  if (!caretEl) return
+  try {
+    caretEl.style.height = __COLLAB_LOCAL_CARET_LINE_HEIGHT__ + 'px'
+    caretEl.style.left = left + 'px'
+    caretEl.style.top = top + 'px'
+    caretEl.style.background = __COLLAB_MY_COLOR__ || '#ff1744'
+    caretEl.style.display = 'block'
+  } catch {}
 }
 
 function colorFromName(name) {
@@ -368,7 +609,7 @@ function getDocMeta() {
   return { id: key, title: display, path: fullPath }
 }
 
-function showStatus(context, type, roomCode, message, docTitle) {
+  function showStatus(context, type, roomCode, message, docTitle) {
   const ui = context && context.ui
   const hasBubble = ui && typeof ui.showNotification === 'function' && typeof ui.hideNotification === 'function'
   let text = ''
@@ -410,12 +651,93 @@ function showStatus(context, type, roomCode, message, docTitle) {
     }
   }
 
-  if (ui && typeof ui.notice === 'function') {
-    try {
-      ui.notice(text, level === 'error' ? 'err' : 'ok', type === 'connecting' || type === 'connected' ? 1600 : 2000)
-    } catch {}
+    if (ui && typeof ui.notice === 'function') {
+      try {
+        ui.notice(text, level === 'error' ? 'err' : 'ok', type === 'connecting' || type === 'connected' ? 1600 : 2000)
+      } catch {}
+    }
   }
-}
+
+  function probeOfficialOnline(labelEl, displayName) {
+    if (!labelEl) return
+    try {
+      labelEl.textContent = '官方服务器在线人数：查询中…'
+    } catch {}
+    try {
+      if (__COLLAB_OFFICIAL_PROBE_WS__) {
+        try { __COLLAB_OFFICIAL_PROBE_WS__.close() } catch {}
+        __COLLAB_OFFICIAL_PROBE_WS__ = null
+      }
+      if (__COLLAB_OFFICIAL_PROBE_TIMER__ != null) {
+        clearTimeout(__COLLAB_OFFICIAL_PROBE_TIMER__)
+        __COLLAB_OFFICIAL_PROBE_TIMER__ = null
+      }
+    } catch {}
+
+    let ws
+    try {
+      const name = String(displayName || '探测').trim() || '探测'
+      const url =
+        OFFICIAL_SERVER_URL +
+        '?room=' + encodeURIComponent(OFFICIAL_ROOM_CODE) +
+        '&password=' + encodeURIComponent(OFFICIAL_PASSWORD) +
+        '&name=' + encodeURIComponent(name)
+      ws = new WebSocket(url)
+    } catch (e) {
+      try { labelEl.textContent = '官方服务器在线人数：查询失败' } catch {}
+      return
+    }
+
+    __COLLAB_OFFICIAL_PROBE_WS__ = ws
+    let settled = false
+    const finish = (text) => {
+      if (settled) return
+      settled = true
+      try { labelEl.textContent = text } catch {}
+      try { ws && ws.close() } catch {}
+      if (__COLLAB_OFFICIAL_PROBE_WS__ === ws) __COLLAB_OFFICIAL_PROBE_WS__ = null
+      if (__COLLAB_OFFICIAL_PROBE_TIMER__ != null) {
+        clearTimeout(__COLLAB_OFFICIAL_PROBE_TIMER__)
+        __COLLAB_OFFICIAL_PROBE_TIMER__ = null
+      }
+    }
+
+    ws.onopen = () => {
+      try {
+        ws.send(JSON.stringify({ type: 'join', content: '' }))
+      } catch {}
+    }
+
+    ws.onmessage = (ev) => {
+      let msg
+      try {
+        msg = JSON.parse(String(ev.data || ''))
+      } catch {
+        return
+      }
+      if (!msg || typeof msg !== 'object') return
+      if (msg.type === 'peers') {
+        let n = 0
+        try {
+          const peers = Array.isArray(msg.peers) ? msg.peers : []
+          n = peers.length >>> 0
+        } catch {}
+        finish(`官方服务器在线人数：${n}`)
+      }
+    }
+
+    ws.onerror = () => {
+      finish('官方服务器在线人数：查询失败')
+    }
+
+    ws.onclose = () => {
+      if (!settled) finish('官方服务器在线人数：查询失败')
+    }
+
+    __COLLAB_OFFICIAL_PROBE_TIMER__ = setTimeout(() => {
+      finish('官方服务器在线人数：查询超时')
+    }, 5000)
+  }
 
 function isConnected() {
   return __COLLAB_WS__ && __COLLAB_WS__.readyState === WebSocket.OPEN
@@ -426,18 +748,19 @@ function stopCollab() {
     clearInterval(__COLLAB_TIMER__)
     __COLLAB_TIMER__ = null
   }
-    if (__COLLAB_WS__) {
-      try {
-        __COLLAB_WS__.close()
-      } catch {}
-      __COLLAB_WS__ = null
-    }
-    if (__COLLAB_CTX__) {
-      showStatus(__COLLAB_CTX__, 'idle')
-    }
-    clearLockPanel()
-    applyEditorCaretColor(false)
+  if (__COLLAB_WS__) {
+    try {
+      __COLLAB_WS__.close()
+    } catch {}
+    __COLLAB_WS__ = null
   }
+  if (__COLLAB_CTX__) {
+    showStatus(__COLLAB_CTX__, 'idle')
+  }
+  clearLockPanel()
+  hideLocalCaret()
+  applyEditorCaretColor(false)
+}
 
 function startSyncLoop(context, cfg) {
   if (__COLLAB_TIMER__) clearInterval(__COLLAB_TIMER__)
@@ -457,9 +780,13 @@ function startSyncLoop(context, cfg) {
         __COLLAB_APPLYING_REMOTE__ = false
       }
       showStatus(context, 'connected', cfg.roomCode, null, cfg.boundDocTitle)
+      applyEditorCaretColor(true)
+      try { updateLocalCaretVisual() } catch {}
     } else if (!active && __COLLAB_DOC_ACTIVE__) {
       __COLLAB_DOC_ACTIVE__ = false
       showStatus(context, 'paused', cfg.roomCode, null, cfg.boundDocTitle)
+      applyEditorCaretColor(false)
+      hideLocalCaret()
     }
 
     if (!active) return
@@ -483,9 +810,19 @@ function startSyncLoop(context, cfg) {
 async function startCollab(context, cfg) {
   stopCollab()
 
-  const wsUrl = String(cfg.serverUrl || '').trim()
-  const room = String(cfg.roomCode || '').trim()
-  const pwd = String(cfg.password || '').trim()
+  const mode = cfg && cfg.serverMode === 'official' ? 'official' : 'custom'
+  const wsUrl =
+    mode === 'official'
+      ? OFFICIAL_SERVER_URL
+      : String(cfg.serverUrl || '').trim()
+  const room =
+    mode === 'official'
+      ? OFFICIAL_ROOM_CODE
+      : String(cfg.roomCode || '').trim()
+  const pwd =
+    mode === 'official'
+      ? OFFICIAL_PASSWORD
+      : String(cfg.password || '').trim()
   const name = String(cfg.displayName || '').trim()
 
   if (!wsUrl || !room || !pwd) {
@@ -527,6 +864,7 @@ async function startCollab(context, cfg) {
       context.ui.notice('协同连接成功', 'ok', 2000)
       __COLLAB_DOC_ACTIVE__ = true
       showStatus(context, 'connected', room, null, cfg.boundDocTitle)
+      try { updateLocalCaretVisual() } catch {}
     } catch (e) {
       context.ui.notice('协同初始化失败', 'err', 2500)
       showStatus(context, 'error', room, '协同初始化失败', cfg.boundDocTitle)
@@ -716,6 +1054,55 @@ function ensurePanel(context) {
   const passField = mkField('协同密码', 'local-collab-pass', 'password')
   const nameField = mkField('显示名称（可选，用于协同中标识你）', 'local-collab-name', 'text')
 
+  const modeWrap = doc.createElement('div')
+  modeWrap.style.marginBottom = '8px'
+  modeWrap.style.display = 'flex'
+  modeWrap.style.alignItems = 'center'
+  modeWrap.style.gap = '12px'
+
+  const modeLabel = doc.createElement('div')
+  modeLabel.textContent = '服务器类型：'
+  modeLabel.style.opacity = '0.8'
+  modeWrap.appendChild(modeLabel)
+
+  const officialLabel = doc.createElement('label')
+  officialLabel.style.display = 'inline-flex'
+  officialLabel.style.alignItems = 'center'
+  officialLabel.style.gap = '4px'
+  const officialInput = doc.createElement('input')
+  officialInput.type = 'radio'
+  officialInput.name = 'local-collab-mode'
+  officialInput.id = 'local-collab-mode-official'
+  officialInput.value = 'official'
+  officialLabel.appendChild(officialInput)
+  const officialText = doc.createElement('span')
+  officialText.textContent = '官方服务器'
+  officialLabel.appendChild(officialText)
+  modeWrap.appendChild(officialLabel)
+
+  const customLabel = doc.createElement('label')
+  customLabel.style.display = 'inline-flex'
+  customLabel.style.alignItems = 'center'
+  customLabel.style.gap = '4px'
+  const customInput = doc.createElement('input')
+  customInput.type = 'radio'
+  customInput.name = 'local-collab-mode'
+  customInput.id = 'local-collab-mode-custom'
+  customInput.value = 'custom'
+  customInput.checked = true
+  customLabel.appendChild(customInput)
+  const customText = doc.createElement('span')
+  customText.textContent = '自定义服务器'
+  customLabel.appendChild(customText)
+  modeWrap.appendChild(customLabel)
+
+  const officialOnline = doc.createElement('div')
+  officialOnline.id = 'local-collab-official-online'
+  officialOnline.style.fontSize = '11px'
+  officialOnline.style.opacity = '0.8'
+  officialOnline.style.marginTop = '4px'
+  officialOnline.textContent = ''
+
   const status = doc.createElement('div')
   status.id = 'local-collab-panel-status'
   status.style.marginTop = '2px'
@@ -750,8 +1137,38 @@ function ensurePanel(context) {
   btnRow.appendChild(btnCancel)
   btnRow.appendChild(btnConnect)
 
+  const applyMode = (mode) => {
+    const isOfficial = mode === 'official'
+    if (isOfficial) {
+      hint.textContent = '使用官方协同服务器，无需配置地址。'
+    } else {
+      hint.textContent = '填写协同服务器地址、房间号和密码。'
+    }
+    serverField.wrap.style.display = isOfficial ? 'none' : 'block'
+    roomField.wrap.style.display = isOfficial ? 'none' : 'block'
+    passField.wrap.style.display = isOfficial ? 'none' : 'block'
+    officialOnline.style.display = isOfficial ? 'block' : 'none'
+  }
+
+  customInput.addEventListener('change', () => {
+    if (customInput.checked) applyMode('custom')
+  })
+  officialInput.addEventListener('change', () => {
+    if (officialInput.checked) {
+      applyMode('official')
+      try {
+        probeOfficialOnline(officialOnline, nameField.input.value || '')
+      } catch {}
+    }
+  })
+
+  // 默认使用自定义服务器模式
+  applyMode('custom')
+
   panel.appendChild(title)
   panel.appendChild(hint)
+  panel.appendChild(modeWrap)
+  panel.appendChild(officialOnline)
   panel.appendChild(serverField.wrap)
   panel.appendChild(roomField.wrap)
   panel.appendChild(passField.wrap)
@@ -773,26 +1190,42 @@ function ensurePanel(context) {
   btnConnect.addEventListener('click', async () => {
     const ctx = __COLLAB_CTX__ || context
     if (!ctx) return
-    const serverUrl = String(serverField.input.value || '').trim()
-    const roomCode = String(roomField.input.value || '').trim()
-    const password = String(passField.input.value || '').trim()
+    const useOfficial = officialInput.checked
+    let serverUrl = ''
+    let roomCode = ''
+    let password = ''
     const displayName = String(nameField.input.value || '').trim()
-    if (!serverUrl) {
-      ctx.ui.notice('服务器地址不能为空', 'err', 2000)
-      return
+
+    if (useOfficial) {
+      serverUrl = OFFICIAL_SERVER_URL
+      roomCode = OFFICIAL_ROOM_CODE
+      password = OFFICIAL_PASSWORD
+    } else {
+      serverUrl = String(serverField.input.value || '').trim()
+      roomCode = String(roomField.input.value || '').trim()
+      password = String(passField.input.value || '').trim()
+      if (!serverUrl) {
+        ctx.ui.notice('服务器地址不能为空', 'err', 2000)
+        return
+      }
+      if (!roomCode) {
+        ctx.ui.notice('房间号不能为空', 'err', 2000)
+        return
+      }
+      if (!password) {
+        ctx.ui.notice('密码不能为空', 'err', 2000)
+        return
+      }
     }
-    if (!roomCode) {
-      ctx.ui.notice('房间号不能为空', 'err', 2000)
-      return
-    }
-    if (!password) {
-      ctx.ui.notice('密码不能为空', 'err', 2000)
-      return
-    }
+
     const cfg = await loadCfg(ctx)
     const meta = getDocMeta()
     const nextCfg = {
       ...cfg,
+      serverMode: useOfficial ? 'official' : 'custom',
+      customServerUrl: useOfficial ? (cfg.customServerUrl || serverField.input.value || '') : serverUrl,
+      customRoomCode: useOfficial ? (cfg.customRoomCode || roomField.input.value || '') : roomCode,
+      customPassword: useOfficial ? (cfg.customPassword || passField.input.value || '') : password,
       serverUrl,
       roomCode,
       password,
@@ -827,10 +1260,40 @@ async function openCollab(context) {
   const roomInput = doc.getElementById('local-collab-room')
   const passInput = doc.getElementById('local-collab-pass')
   const nameInput = doc.getElementById('local-collab-name')
-  if (serverInput) serverInput.value = cfg.serverUrl || ''
-  if (roomInput) roomInput.value = cfg.roomCode || ''
-  if (passInput) passInput.value = cfg.password || ''
+  const modeOfficialInput = doc.getElementById('local-collab-mode-official')
+  const modeCustomInput = doc.getElementById('local-collab-mode-custom')
+  const officialOnlineEl = doc.getElementById('local-collab-official-online')
+
+  const customServerUrl = cfg.customServerUrl || cfg.serverUrl || ''
+  const customRoomCode = cfg.customRoomCode || cfg.roomCode || ''
+  const customPassword = cfg.customPassword || cfg.password || ''
+
+  if (serverInput) serverInput.value = customServerUrl
+  if (roomInput) roomInput.value = customRoomCode
+  if (passInput) passInput.value = customPassword
   if (nameInput) nameInput.value = cfg.displayName || ''
+
+  const useOfficial = cfg.serverMode === 'official'
+  if (modeOfficialInput && modeCustomInput) {
+    if (useOfficial) {
+      modeOfficialInput.checked = true
+      modeCustomInput.checked = false
+      try {
+        modeOfficialInput.dispatchEvent(new Event('change'))
+      } catch {}
+      if (officialOnlineEl) {
+        try {
+          probeOfficialOnline(officialOnlineEl, nameInput ? nameInput.value : '')
+        } catch {}
+      }
+    } else {
+      modeOfficialInput.checked = false
+      modeCustomInput.checked = true
+      try {
+        modeCustomInput.dispatchEvent(new Event('change'))
+      } catch {}
+    }
+  }
   const meta = getDocMeta()
   const statusEl = doc.getElementById('local-collab-panel-status')
   if (statusEl) {
@@ -858,8 +1321,8 @@ function bindLockGuards(context) {
     try {
       if (!isConnected() || !__COLLAB_CFG__ || !__COLLAB_DOC_ACTIVE__) return
       const ta = e.target
-      if (!ta || ta !== editorEl) return
-      __COLLAB_LAST_TYPED_AT__ = Date.now()
+        if (!ta || ta !== editorEl) return
+        __COLLAB_LAST_TYPED_AT__ = Date.now()
       const content = String(context.getEditorValue() || '')
       const pos = ta.selectionStart >>> 0
       const info = getBlockInfo(content, pos)
@@ -884,39 +1347,62 @@ function bindLockGuards(context) {
             __COLLAB_MY_LOCKS__.add(info.id)
           } catch {}
         }
-        if (__COLLAB_MY_LOCKS__.has(info.id)) {
-          scheduleLockAutoRelease(info.id, context)
+          if (__COLLAB_MY_LOCKS__.has(info.id)) {
+            scheduleLockAutoRelease(info.id, context)
+          }
         }
-      }
-    } catch {}
+        try {
+          updateLocalCaretVisual()
+        } catch {}
+      } catch {}
   }
   editorEl.addEventListener('beforeinput', handler, true)
+  try {
+    editorEl.addEventListener('keyup', () => {
+      try {
+        updateLocalCaretVisual()
+      } catch {}
+    })
+    editorEl.addEventListener('click', () => {
+      try {
+        updateLocalCaretVisual()
+      } catch {}
+    })
+    editorEl.addEventListener('scroll', () => {
+      try {
+        updateLocalCaretVisual()
+      } catch {}
+    })
+  } catch {}
 }
 
 export async function activate(context) {
   __COLLAB_CTX__ = context
 
-  if (typeof context.onSelectionChange === 'function') {
-    try {
-      context.onSelectionChange((sel) => {
-        try {
-          if (!isConnected() || !__COLLAB_CFG__ || !__COLLAB_DOC_ACTIVE__) return
+    if (typeof context.onSelectionChange === 'function') {
+      try {
+        context.onSelectionChange((sel) => {
+          try {
+            if (!isConnected() || !__COLLAB_CFG__ || !__COLLAB_DOC_ACTIVE__) return
           const content = String(context.getEditorValue() || '')
           const info = getBlockInfo(content, sel.start >>> 0)
           const prevId = __COLLAB_CURRENT_BLOCK_ID__
-          __COLLAB_CURRENT_BLOCK_ID__ = info.id
-          if (prevId && prevId !== info.id && __COLLAB_MY_LOCKS__.has(prevId) && __COLLAB_WS__ && __COLLAB_WS__.readyState === WebSocket.OPEN) {
+            __COLLAB_CURRENT_BLOCK_ID__ = info.id
+            if (prevId && prevId !== info.id && __COLLAB_MY_LOCKS__.has(prevId) && __COLLAB_WS__ && __COLLAB_WS__.readyState === WebSocket.OPEN) {
+              try {
+                __COLLAB_WS__.send(JSON.stringify({ type: 'unlock', blockId: prevId }))
+              } catch {}
+              __COLLAB_MY_LOCKS__.delete(prevId)
+            }
+            if (__COLLAB_MY_LOCKS__.has(info.id)) {
+              scheduleLockAutoRelease(info.id, context)
+            }
             try {
-              __COLLAB_WS__.send(JSON.stringify({ type: 'unlock', blockId: prevId }))
+              updateLocalCaretVisual()
             } catch {}
-            __COLLAB_MY_LOCKS__.delete(prevId)
-          }
-          if (__COLLAB_MY_LOCKS__.has(info.id)) {
-            scheduleLockAutoRelease(info.id, context)
-          }
-        } catch {}
-      })
-    } catch {}
+          } catch {}
+        })
+      } catch {}
   }
 
   bindLockGuards(context)

@@ -2,6 +2,14 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.5.3
+- Added: Extension marketplace search for extension name, author, and description, plus GitHub / Official channel switching, an "installed only" filter, and a "Featured" badge with clearer card layout and loading states.
+- Added: "Markdown Table Helper" marketplace extension that lets you quickly insert Markdown tables at the cursor, working together with WYSIWYG mode for a more spreadsheet-like editing experience.
+- Improved: Unified table styling across Edit / Reading / WYSIWYG modes with light/dark-aware table color variables for borders and headers, boosting contrast and readability on dark backgrounds.
+- Improved: Theme settings panel with new typography presets ("Tech", "Literary"), a new "Minimalist" Markdown style, and additional eye-friendly palettes (Tea Green, Paper White, Soft Pink), plus a tighter overall layout.
+- Improved: Extension manager now uses incremental updates and background refresh of marketplace data when reopening the panel, avoiding full re-renders while still allowing a manual "Refresh" to force updates.
+- Fixed: Visual inconsistencies in table borders/header colors under dark mode and some themes, and several styling issues in the extension manager when using dark themes.
+
 ## Update v0.5.2
 - Added: Switched collaboration mode to a JS-driven custom cursor with clearer color differentiation, aligned cursor colors in the collaboration plugin, and bundled an official collaboration server option to make multi-user sessions easier to recognize and join.
 - Improved: Refined WYSIWYG editing styles for KaTeX and other inline math, together with a cleaner baseline layout for the plain Edit mode so long-form editing and reading feel more consistent.

@@ -5227,6 +5227,7 @@ async function renderRecentPanel(toggle = true) {
     panel.innerHTML = '<div class="empty">暂时没有最近文件</div>'
   } else {
     panel.innerHTML = recents
+      .filter(p => p != null && typeof p === 'string')
       .map(
         (p, idx) =>
           `<div class=\"item\" data-path=\"${p.replace(/\"/g, '&quot;')}\">` +

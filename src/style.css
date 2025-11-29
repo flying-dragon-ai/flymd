@@ -24,6 +24,11 @@
   --sticky-rgb: 255, 255, 255;
   /* 便签模式前景色（可选覆盖） */
   --sticky-fg: ;
+  /* 表格颜色变量（自动适配亮/暗主题） */
+  --table-border: #d0d7de;
+  --table-header-bg: #f6f8fa;
+  --table-header-fg: #24292f;
+  --table-row-hover: #f6f8fa;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -40,6 +45,11 @@
     --wysiwyg-bg: #0b1016;         /* 更深的蓝黑 */
     --wysiwyg-status-bg: #0f1a24;  /* 状态条背景 */
     --code-bg: #111827;            /* 代码块背景（暗） */
+    /* 深色表格颜色变量 */
+    --table-border: #4b5563;
+    --table-header-bg: #1f2937;
+    --table-header-fg: #f3f4f6;
+    --table-row-hover: rgba(55, 65, 81, 0.3);
   }
 }
 html, body, #app { height: 100%; }
@@ -1483,20 +1493,20 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 .preview table th {
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--table-border);
   padding: 12px 16px;
-  background: var(--panel-bg);
+  background: var(--table-header-bg);
   font-weight: 600;
   text-align: left;
-  color: var(--fg);
+  color: var(--table-header-fg);
 }
 .preview table td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--table-border);
   padding: 10px 16px;
   transition: background 0.15s ease;
 }
 .preview table tr:hover td {
-  background: rgba(127,127,127,0.03);
+  background: var(--table-row-hover);
 }
 .preview table tbody tr:nth-child(even) {
   background: rgba(127,127,127,0.02);
@@ -2426,8 +2436,6 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 @media (prefers-color-scheme: dark) {
   .container.md-card .preview pre { background: #0f1114; border-color: #262a33; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
   .container.md-card .preview :not(pre) > code { background: #13161a; border-color: #262a33; }
-  .container.md-card .preview th { background: #151a1f; }
-  .container.md-card .preview td, .container.md-card .preview th { border-color: #262a33; }
 
   /* 终端风（已移除） */
 
@@ -2440,10 +2448,6 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 @media (prefers-color-scheme: dark) {
   .container.md-github .preview pre { background: #0d1117; border-color: #30363d; }
   .container.md-github .preview :not(pre) > code { background: #161b22; border-color: #30363d; color: #c9d1d9; }
-  .container.md-github .preview table th,
-  .container.md-github .preview table td { border-color: #30363d; }
-  .container.md-github .preview table th { background: #161b22; }
-  .container.md-github .preview table tbody tr:nth-child(even) { background: #0f141b; }
 
   /* 深色主题下，阅读模式的 GitHub 风格代码块/行内代码（与浅色规则同等特异性，避免被覆盖） */
   .container.md-github:not(.wysiwyg):not(.wysiwyg-v2) .preview pre { background: #0d1117; border-color: #30363d; }
@@ -2451,10 +2455,6 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 
   .container.md-notion .preview pre { background: #1c1c1a; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
   .container.md-notion .preview :not(pre) > code { background: #1a1917; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }
-  .container.md-notion .preview table { border-color: rgba(255,255,255,0.08); }
-  .container.md-notion .preview table th,
-  .container.md-notion .preview table td { border-color: rgba(255,255,255,0.08); }
-  .container.md-notion .preview table th { background: rgba(255,255,255,0.04); }
 
   /* 深色主题下，阅读模式的 Notion 风格代码块/行内代码（与浅色规则同等特异性，避免被覆盖） */
   .container.md-notion:not(.wysiwyg):not(.wysiwyg-v2) .preview pre { background: #1c1c1a; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
@@ -2462,8 +2462,6 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 
   .container.md-journal .preview pre { background: #141210; border-color: #3a332a; }
   .container.md-journal .preview :not(pre) > code { background: #17130f; border-color: #3a332a; }
-  .container.md-journal .preview table th,
-  .container.md-journal .preview table td { border-bottom-color: rgba(240,220,180,0.16); }
 
   /* 深色主题下，阅读模式的 出版风（journal）代码块/行内代码（与浅色规则同等特异性，避免被覆盖） */
   .container.md-journal:not(.wysiwyg):not(.wysiwyg-v2) .preview pre { background: #141210; border-color: #3a332a; }
@@ -4661,11 +4659,17 @@ body.dark-mode .preview blockquote {
 
 body.dark-mode .preview table th,
 body.dark-mode .preview table td {
-  border-color: #374151 !important;
+  border-color: var(--table-border) !important;
+  color: var(--fg) !important;
 }
 
 body.dark-mode .preview table th {
-  background: #1f2937 !important;
+  background: var(--table-header-bg) !important;
+  color: var(--table-header-fg) !important;
+}
+
+body.dark-mode .preview tbody tr:hover td {
+  background: var(--table-row-hover) !important;
 }
 
 body.dark-mode .preview hr {

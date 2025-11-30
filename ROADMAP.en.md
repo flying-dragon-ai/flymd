@@ -2,6 +2,16 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.5.4
+- Added: AI chat can now link with Sticky Notes so you can quickly turn replies into notes or todos and keep ideas from getting lost.
+- Improved: Default Sticky Note spawn position so new notes appear closer to the current document and area of focus, reducing manual dragging.
+- Added: Custom drag-and-drop ordering for the sidebar tree so you can arrange documents in whatever order best matches your workflow.
+- Improved: PDFs are now sorted separately from Markdown files in the library while still honoring your custom sort order, and deprecated custom library icons have been removed.
+- Improved: PDF items are now distinguished by text color instead of a red dot, making the file list cleaner and less visually noisy.
+- Improved: WebDAV sync defaults — newly created libraries start with WebDAV sync disabled to avoid accidentally syncing into an old library; once a sync path is configured, the setting follows library switching.
+- Fixed: Added an explicit prompt when WebDAV is not configured and fixed a bug where the sync conflict dialog might fail to appear, reducing the risk of silent conflicts.
+- Docs: Updated README and corrected the PackyCode link formatting.
+
 ## Update v0.5.3
 - Added: Extension marketplace search for extension name, author, and description, plus GitHub / Official channel switching, an "installed only" filter, and a "Featured" badge with clearer card layout and loading states.
 - Added: "Markdown Table Helper" marketplace extension that lets you quickly insert Markdown tables at the cursor, working together with WYSIWYG mode for a more spreadsheet-like editing experience.

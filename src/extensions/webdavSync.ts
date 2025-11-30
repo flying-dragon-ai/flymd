@@ -3,7 +3,7 @@
 // - 仅按最后修改时间比较；新者覆盖旧者；不做合并
 
 import { Store } from '@tauri-apps/plugin-store'
-import { getActiveLibraryRoot } from '../utils/library'
+import { getActiveLibraryRoot, getActiveLibraryId } from '../utils/library'
 import { readDir, stat, readFile, writeFile, mkdir, exists, open as openFileHandle, BaseDirectory, remove } from '@tauri-apps/plugin-fs'
 import { appLocalDataDir } from '@tauri-apps/api/path'
 import { openPath } from '@tauri-apps/plugin-opener'
@@ -459,9 +459,21 @@ function sanitizeHttpHosts(list: any): string[] {
   return out
 }
 
-export async function getWebdavSyncConfig(): Promise<WebdavSyncConfig> {
-  const store = await getStore()
-  const raw = (await store.get('sync')) as any
+// 旧版同步配置是否为“全局配置”形态（未按库拆分）
+function isLegacySyncConfigShape(raw: any): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  if (raw.profiles && typeof raw.profiles === 'object') return false
+  return (
+    'baseUrl' in raw ||
+    'rootPath' in raw ||
+    'enabled' in raw ||
+    'onStartup' in raw ||
+    'onShutdown' in raw
+  )
+}
+
+// 从存储的原始对象构造完整配置（带默认值），保持向后兼容
+function buildWebdavConfigFromRaw(raw: any): WebdavSyncConfig {
   const cfg: WebdavSyncConfig = {
     enabled: raw?.enabled === true,
     onStartup: raw?.onStartup === true,
@@ -474,10 +486,10 @@ export async function getWebdavSyncConfig(): Promise<WebdavSyncConfig> {
     password: String(raw?.password || ''),
     rootPath: String(raw?.rootPath || '/flymd'),
     clockSkewMs: Number(raw?.clockSkewMs) || 0,
-    conflictStrategy: raw?.conflictStrategy || 'newest',  // 默认newest
-    skipRemoteScanMinutes: Number(raw?.skipRemoteScanMinutes) >= 0 ? Number(raw?.skipRemoteScanMinutes) : 5,  // 默认5分钟
-    confirmDeleteRemote: raw?.confirmDeleteRemote !== false,  // 默认true（需要确认）
-    localDeleteStrategy: raw?.localDeleteStrategy || 'auto',  // 默认auto（自动删除）
+    conflictStrategy: raw?.conflictStrategy || 'newest',
+    skipRemoteScanMinutes: Number(raw?.skipRemoteScanMinutes) >= 0 ? Number(raw?.skipRemoteScanMinutes) : 5,
+    confirmDeleteRemote: raw?.confirmDeleteRemote !== false,
+    localDeleteStrategy: raw?.localDeleteStrategy || 'auto',
     allowHttpInsecure: raw?.allowHttpInsecure === true,
     allowedHttpHosts: sanitizeHttpHosts(raw?.allowedHttpHosts),
     encryptEnabled: raw?.encryptEnabled === true,
@@ -487,10 +499,79 @@ export async function getWebdavSyncConfig(): Promise<WebdavSyncConfig> {
   return cfg
 }
 
+// 读取当前库对应的 WebDAV 配置（按库隔离，兼容旧版全局配置）
+export async function getWebdavSyncConfig(): Promise<WebdavSyncConfig> {
+  const store = await getStore()
+  const raw = (await store.get('sync')) as any
+  let storeValue: any = raw
+
+  const libId = await (async () => {
+    try { return await getActiveLibraryId() } catch { return null }
+  })()
+
+  // 统一存储结构：{ version, profiles: { [libId]: rawCfg } }
+  if (!storeValue || typeof storeValue !== 'object' || Array.isArray(storeValue)) {
+    storeValue = { version: 1, profiles: {} as Record<string, any> }
+  }
+
+  let migrated = false
+
+  if (!storeValue.profiles || typeof storeValue.profiles !== 'object' || Array.isArray(storeValue.profiles)) {
+    // 旧版：直接将全局配置迁移到“当前库”的 profile 下
+    const profiles: Record<string, any> = {}
+    if (libId && isLegacySyncConfigShape(storeValue)) {
+      profiles[libId] = { ...storeValue }
+    }
+    storeValue = { version: 1, profiles }
+    migrated = true
+  }
+
+  const profiles = storeValue.profiles as Record<string, any>
+
+  // 如果仍然是旧版形态（没有 profiles，但字段像配置），再兜底迁移一次
+  if (libId && isLegacySyncConfigShape(raw) && !profiles[libId]) {
+    profiles[libId] = { ...raw }
+    migrated = true
+  }
+
+  if (migrated) {
+    try {
+      await store.set('sync', storeValue)
+      await store.save()
+    } catch {}
+  }
+
+  const rawCfg = libId ? profiles[libId] || {} : {}
+  return buildWebdavConfigFromRaw(rawCfg)
+}
+
+// 为当前激活库写入 WebDAV 配置（每个库有独立 profile）
 export async function setWebdavSyncConfig(next: Partial<WebdavSyncConfig>): Promise<void> {
   const store = await getStore()
-  const cur = (await store.get('sync')) as any || {}
-  const merged: any = { ...cur, ...next }
+  const raw = (await store.get('sync')) as any
+  let storeValue: any = raw
+
+  const libId = await (async () => {
+    try { return await getActiveLibraryId() } catch { return null }
+  })()
+
+  if (!storeValue || typeof storeValue !== 'object' || Array.isArray(storeValue)) {
+    storeValue = { version: 1, profiles: {} as Record<string, any> }
+  }
+
+  if (!storeValue.profiles || typeof storeValue.profiles !== 'object' || Array.isArray(storeValue.profiles)) {
+    const profiles: Record<string, any> = {}
+    if (libId && isLegacySyncConfigShape(storeValue)) {
+      profiles[libId] = { ...storeValue }
+    }
+    storeValue = { version: 1, profiles }
+  }
+
+  const profiles = storeValue.profiles as Record<string, any>
+  const curRaw = (libId && profiles[libId] && typeof profiles[libId] === 'object' && !Array.isArray(profiles[libId]))
+    ? profiles[libId]
+    : {}
+  const merged: any = { ...curRaw, ...next }
 
   // 若开启加密且已有密钥但尚无盐值，则生成一个固定盐值（每个配置唯一）
   try {
@@ -506,7 +587,16 @@ export async function setWebdavSyncConfig(next: Partial<WebdavSyncConfig>): Prom
   if (Array.isArray(merged.allowedHttpHosts)) {
     merged.allowedHttpHosts = merged.allowedHttpHosts.map((v: any) => typeof v === 'string' ? v.trim() : '').filter((v: string) => !!v)
   }
-  await store.set('sync', merged)
+  if (libId) {
+    profiles[libId] = merged
+    storeValue.version = 1
+    storeValue.profiles = profiles
+  } else {
+    // 理论上不会走到这里（必须有激活库），兜底保持旧行为
+    storeValue = merged
+  }
+
+  await store.set('sync', storeValue)
   await store.save()
 }
 

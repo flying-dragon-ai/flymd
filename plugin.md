@@ -735,6 +735,79 @@ try {
 **参数说明：**
 - `id`（string，必需）：通知 ID，由 `showNotification` 返回
 
+### context.layout.registerPanel (新增)
+
+注册一个由宿主统一管理布局的插件 Panel，用于实现类似侧边栏 / 底部面板的效果（会**真实挤压**编辑区，而不是浮在上面）。目前主要用于 AI 助手，但任何插件都可以使用。
+
+> 注意：这是高级 API，只有在 **确实需要占用大面积 UI** 时才使用。简单操作请继续用菜单或右键菜单。
+
+```javascript
+export function activate(context) {
+  // 注册一个左侧 Panel，占用 320px 宽度
+  const panel = context.layout.registerPanel('main', {
+    side: 'left',      // 'left' | 'right' | 'bottom'
+    size: 320,         // 像素值：宽度（左右）或高度（底部）
+    visible: true      // 是否一开始就可见（默认 true）
+  });
+
+  // 根据状态动态调整
+  someEventEmitter.on('collapse', () => {
+    panel.setVisible(false);       // 隐藏 Panel，不再占用空间
+  });
+
+  someEventEmitter.on('expand', () => {
+    panel.update({ visible: true, size: 420 }); // 显示并调整宽度
+  });
+
+  // 插件卸载前记得释放（通常在 deactivate 里）
+  return () => {
+    panel.dispose();
+  };
+}
+```
+
+**方法签名：**
+
+```ts
+const handle = context.layout.registerPanel(
+  panelId: string,
+  options: {
+    side: 'left' | 'right' | 'bottom';
+    size: number;        // 左/右：宽度；bottom：高度
+    visible?: boolean;   // 默认 true
+  }
+);
+```
+
+**返回值：** `handle: PluginDockPanelHandle`
+
+- `handle.setVisible(visible: boolean)`  
+  显示 / 隐藏 Panel。隐藏时不再影响编辑区宽度/高度。
+
+- `handle.setSide(side: 'left' | 'right' | 'bottom')`  
+  动态切换 Panel 所在区域（例如从右侧切到底部）。
+
+- `handle.setSize(size: number)`  
+  更新 Panel 尺寸：
+  - `side = 'left' | 'right'`：表示宽度（px）；
+  - `side = 'bottom'`：表示高度（px）。
+
+- `handle.update(options: { side?: ..., size?: ..., visible?: ... })`  
+  一次更新多个属性，等价于依次调用上面几个方法。
+
+- `handle.dispose()`  
+  取消注册，彻底移除 Panel 对布局的影响。通常在 `deactivate()` 中调用。
+
+**布局规则说明：**
+
+- 所有插件 Panel（包括 AI 助手）会被宿主集中管理：
+  - 左侧：所有 `side='left'` 的 Panel 的宽度相加，汇总到 `--dock-left-gap`；
+  - 右侧：所有 `side='right'` 的宽度相加到 `--dock-right-gap`；
+  - 底部：所有 `side='bottom'` 的高度相加到 `--dock-bottom-gap`；
+  - 编辑区/预览区根据这三个值自动缩放，**不会被遮挡**。
+- 文档库侧栏仍然受自己的设置控制，但在计算工作区宽度时会被一起考虑，
+  对插件来说不需要手动处理库的宽度，只关心自己的 Panel 尺寸即可。
+
 ### context.getEditorValue
 
 获取编辑器当前内容。

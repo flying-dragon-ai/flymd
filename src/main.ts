@@ -391,6 +391,8 @@ function selectLibraryNode(el: HTMLElement | null, path: string | null, isDir: b
 }
 
 let currentFilePath: string | null = null
+// YAML Front Matter 当前缓存，仅用于渲染/所见模式，源码始终保留完整文本
+let currentFrontMatter: string | null = null
 // 全局“未保存更改”标记（供关闭时提示与扩展查询）
 let dirty = false; // 是否有未保存更改（此处需加分号，避免下一行以括号开头被解析为对 false 的函数调用）
 // 暴露一个轻量只读查询函数，避免直接访问变量引起耦合
@@ -2003,10 +2005,56 @@ function scheduleWysiwygRender() {
       _wysiwygRaf = 0
       try {
         const value = String((editor as HTMLTextAreaElement).value || '')
-        void wysiwygV2ReplaceAll(value)
+        const { body } = splitYamlFrontMatter(value)
+        void wysiwygV2ReplaceAll(body)
       } catch {}
     })
   } catch {}
+}
+
+// YAML Front Matter 解析：仅检测文首形如
+// ---
+// key: value
+// ---
+// 的块；否则一律视为普通 Markdown，避免误伤旧文档
+function splitYamlFrontMatter(raw: string): { frontMatter: string | null; body: string } {
+  try {
+    if (!raw) return { frontMatter: null, body: '' }
+    let text = String(raw)
+    // 处理 UTF-8 BOM，保留给正文
+    let bom = ''
+    if (text.charCodeAt(0) === 0xfeff) {
+      bom = '\uFEFF'
+      text = text.slice(1)
+    }
+    const lines = text.split('\n')
+    if (lines.length < 3) return { frontMatter: null, body: raw }
+    if (lines[0].trim() !== '---') return { frontMatter: null, body: raw }
+    let end = -1
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].trim() === '---') { end = i; break }
+    }
+    if (end < 0) return { frontMatter: null, body: raw }
+    // 至少有一行看起来像 "key: value" 才认为是 YAML
+    let looksYaml = false
+    for (let i = 1; i < end; i++) {
+      const s = lines[i].trim()
+      if (!s || s.startsWith('#')) continue
+      if (/^[A-Za-z0-9_.-]+\s*:/.test(s)) { looksYaml = true; break }
+    }
+    if (!looksYaml) return { frontMatter: null, body: raw }
+    const fmLines = lines.slice(0, end + 1)
+    const bodyLines = lines.slice(end + 1)
+    let fmText = fmLines.join('\n')
+    let bodyText = bodyLines.join('\n')
+    // 常见写法：头部后空一行，渲染时剥掉这行
+    bodyText = bodyText.replace(/^\r?\n/, '')
+    if (bom) bodyText = bom + bodyText
+    if (!fmText.endsWith('\n')) fmText += '\n'
+    return { frontMatter: fmText, body: bodyText }
+  } catch {
+    return { frontMatter: null, body: raw }
+  }
 }
 
 // 轻渲染：仅生成安全的 HTML，不执行 Mermaid/代码高亮等重块
@@ -2091,6 +2139,11 @@ async function renderPreviewLight() {
         raw = lines.join('\n')
       } catch {}
     }
+  } catch {}
+  // 轻渲染预览：只渲染正文部分，忽略 YAML Front Matter
+  try {
+    const { body } = splitYamlFrontMatter(raw)
+    raw = body
   } catch {}
   const html = md!.render(raw)
   // 方案 A：占位符机制不需要 DOMPurify
@@ -2284,7 +2337,33 @@ async function setWysiwygEnabled(enable: boolean) {
         // 给 root 一个占位提示，避免用户误以为空白
         try { if (root) root.textContent = '正在加载所见编辑器…' } catch {}
         // 调用 enableWysiwygV2 来创建/更新编辑器（会自动处理清理和重建）
-        const __st = (editor as HTMLTextAreaElement).selectionStart >>> 0; let __mdInit = (editor as HTMLTextAreaElement).value; try { if (__st > 0 && __mdInit[__st-1] === '\n' && (__st < 2 || __mdInit[__st-2] !== '\n')) { const before = __mdInit.slice(0, __st-1); const after = __mdInit.slice(__st-1); if (!/  $/.test(before)) { __mdInit = before + '  ' + after } } } catch {} await enableWysiwygV2(root!, __mdInit, (mdNext) => { try { const _md = String(mdNext || '').replace(/\u2003/g,'&emsp;'); if (_md !== editor.value) { editor.value = _md; dirty = true; refreshTitle(); refreshStatus() } } catch {} })
+        const __st = (editor as HTMLTextAreaElement).selectionStart >>> 0
+        let __mdInit = (editor as HTMLTextAreaElement).value
+        // 保留原有换行补两个空格的逻辑（行首/行尾软换行处理）
+        try {
+          if (__st > 0 && __mdInit[__st - 1] === '\n' && (__st < 2 || __mdInit[__st - 2] !== '\n')) {
+            const before = __mdInit.slice(0, __st - 1)
+            const after = __mdInit.slice(__st - 1)
+            if (!/  $/.test(before)) { __mdInit = before + '  ' + after }
+          }
+        } catch {}
+        // 剥离 YAML Front Matter：所见模式只编辑正文，但保存时拼回头部，保证文件内容零破坏
+        const fmSplit = splitYamlFrontMatter(__mdInit)
+        currentFrontMatter = fmSplit.frontMatter
+        const __mdInitBody = fmSplit.body
+        await enableWysiwygV2(root!, __mdInitBody, (mdNext) => {
+          try {
+            const bodyNext = String(mdNext || '').replace(/\u2003/g, '&emsp;')
+            const fm = currentFrontMatter || ''
+            const combined = fm ? fm + bodyNext : bodyNext
+            if (combined !== editor.value) {
+              editor.value = combined
+              dirty = true
+              refreshTitle()
+              refreshStatus()
+            }
+          } catch {}
+        })
         wysiwygV2Active = true
         if (container) { container.classList.remove('wysiwyg-v2-loading'); container.classList.add('wysiwyg-v2'); }
         // 所见模式启用后应用当前缩放
@@ -3777,6 +3856,11 @@ async function renderPreview() {
         raw = lines.join('\n')
       } catch {}
     }
+  } catch {}
+  // 阅读模式/所见模式预览：渲染时剥离 YAML Front Matter，仅显示正文
+  try {
+    const { body } = splitYamlFrontMatter(raw)
+    raw = body
   } catch {}
   const html = md!.render(raw)
   // 按需加载 KaTeX 样式：检测渲染结果是否包含 katex 片段

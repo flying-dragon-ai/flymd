@@ -1612,6 +1612,13 @@ async function fetchImageAsDataUrlForVision(url){
 }
 
 async function convertHttpImageUrlsToDataUrl(messages){
+  // 浏览器环境下跨域受限，统一交给后端处理；仅在非 http(s) 协议（如 Tauri）下尝试本地转码
+  try {
+    if (typeof window !== 'undefined') {
+      const proto = String(window.location.protocol || '').toLowerCase()
+      if (proto === 'http:' || proto === 'https:') return null
+    }
+  } catch {}
   if (!Array.isArray(messages) || !messages.length) return null
   let cloned
   try {

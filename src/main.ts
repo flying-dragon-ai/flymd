@@ -7148,8 +7148,24 @@ function updateFocusSidebarBg() {
   }
 }
 
-// 监听模式切换事件，更新专注模式侧栏背景
-window.addEventListener('flymd:mode:changed', () => updateFocusSidebarBg())
+// 监听模式切换事件，更新专注模式侧栏背景和外圈UI颜色
+window.addEventListener('flymd:mode:changed', (ev: Event) => {
+  updateFocusSidebarBg()
+  // 更新外圈UI颜色（标题栏、侧栏等）跟随当前模式背景
+  try {
+    const detail = (ev as CustomEvent).detail || {}
+    // 优先使用事件携带的模式信息，否则使用全局 mode/wysiwyg 状态
+    let currentMode: 'edit' | 'wysiwyg' | 'preview' = 'edit'
+    if (detail.wysiwyg === true) {
+      currentMode = 'wysiwyg'
+    } else if (detail.mode === 'preview' || (typeof detail.mode === 'undefined' && mode === 'preview')) {
+      currentMode = 'preview'
+    } else if (detail.wysiwyg === false && wysiwyg === false) {
+      currentMode = mode === 'preview' ? 'preview' : 'edit'
+    }
+    updateChromeColorsForMode(currentMode)
+  } catch {}
+})
 // 监听主题变更事件，更新专注模式侧栏背景
 window.addEventListener('flymd:theme:changed', () => updateFocusSidebarBg())
 
@@ -8588,7 +8604,7 @@ function showModeMenu() {
   showTopMenu(anchor, [
     { label: t('mode.edit'), accel: 'Ctrl+E', action: async () => {
       if (wysiwyg) { try { await setWysiwygEnabled(false) } catch {}; return }
-      if (mode !== 'edit') { mode = 'edit'; try { preview.classList.add('hidden') } catch {}; try { editor.focus() } catch {}; try { syncToggleButton() } catch {} }
+      if (mode !== 'edit') { mode = 'edit'; try { preview.classList.add('hidden') } catch {}; try { editor.focus() } catch {}; try { syncToggleButton() } catch {}; try { updateChromeColorsForMode('edit') } catch {} }
     } },
        { label: t('mode.read'), accel: 'Ctrl+R', action: async () => {
       mode = 'preview'
@@ -8596,6 +8612,7 @@ function showModeMenu() {
       try { await renderPreview() } catch {}
       if (wysiwyg) { try { await setWysiwygEnabled(false) } catch {}; return }
       try { syncToggleButton() } catch {}
+      try { updateChromeColorsForMode('preview') } catch {}
     } },
     { label: t('mode.wysiwyg'), accel: 'Ctrl+W', action: () => { void setWysiwygEnabled(true) } },
   ])
@@ -10124,6 +10141,8 @@ function bindEvents() {
           try { syncToggleButton() } catch {}
           // 更新专注模式侧栏背景色
           setTimeout(() => updateFocusSidebarBg(), 100);
+          // 更新外圈UI颜色
+          try { updateChromeColorsForMode('preview') } catch {}
           return
         }
       } catch {}
@@ -10134,6 +10153,8 @@ function bindEvents() {
         try { syncToggleButton() } catch {}
         // 更新专注模式侧栏背景色
         setTimeout(() => updateFocusSidebarBg(), 100);
+        // 更新外圈UI颜色
+        try { updateChromeColorsForMode('preview') } catch {}
       }
       return
     }

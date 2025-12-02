@@ -71,6 +71,94 @@ function getContainer(): HTMLElement | null {
   return document.querySelector('.container') as HTMLElement | null
 }
 
+// 工具：解析颜色字符串（十六进制或 rgb/rgba），用于计算菜单栏/标签栏/侧栏等“外圈 UI”的衍生色
+function parseColor(input: string): { r: number; g: number; b: number } | null {
+  try {
+    if (!input) return null
+    let s = input.trim().toLowerCase()
+
+    // 十六进制形式
+    if (s.startsWith('#')) {
+      s = s.slice(1)
+      if (s.length === 3) {
+        const r3 = s[0]
+        const g3 = s[1]
+        const b3 = s[2]
+        s = r3 + r3 + g3 + g3 + b3 + b3
+      }
+      if (s.length !== 6) return null
+      const r16 = Number.parseInt(s.slice(0, 2), 16)
+      const g16 = Number.parseInt(s.slice(2, 4), 16)
+      const b16 = Number.parseInt(s.slice(4, 6), 16)
+      if ([r16, g16, b16].some(v => Number.isNaN(v))) return null
+      return { r: r16, g: g16, b: b16 }
+    }
+
+    // rgb / rgba 形式
+    if (s.startsWith('rgb')) {
+      const m = s.match(/rgba?\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)/)
+      if (!m) return null
+      const r = Number.parseFloat(m[1])
+      const g = Number.parseFloat(m[2])
+      const b = Number.parseFloat(m[3])
+      if ([r, g, b].some(v => !Number.isFinite(v))) return null
+      return { r, g, b }
+    }
+
+    // 其它格式暂不支持
+    return null
+
+  } catch {
+    return null
+  }
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)))
+  const to2 = (v: number) => clamp(v).toString(16).padStart(2, '0')
+  return `#${to2(r)}${to2(g)}${to2(b)}`
+}
+
+function deriveChromeColors(baseColor: string): { chromeBg: string; chromePanelBg: string } | null {
+  const rgb = parseColor(baseColor)
+  if (!rgb) return null
+
+  // 简单亮度估算：区分“偏亮/偏暗”，以决定往深/浅微调
+  const brightness = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b
+  const isDark = brightness < 128
+
+  // 外圈背景比内容区只略微拉开亮度，避免对比度过大
+  const surfaceDelta = isDark ? 8 : -6   // 标题栏/标签栏
+  const panelDelta = isDark ? 14 : -10  // 侧栏等面板
+
+  const chromeBg = rgbToHex(rgb.r + surfaceDelta, rgb.g + surfaceDelta, rgb.b + surfaceDelta)
+  const chromePanelBg = rgbToHex(rgb.r + panelDelta, rgb.g + panelDelta, rgb.b + panelDelta)
+  return { chromeBg, chromePanelBg }
+}
+
+// 根据当前容器背景色更新“外圈 UI”变量；若计算失败则回退到可选的备用颜色
+function updateChromeColorsFromContainer(container: HTMLElement, fallbackBase?: string): void {
+  try {
+    const root = document.body
+    let base = ''
+    try {
+      const cs = window.getComputedStyle(container)
+      base = cs.backgroundColor || ''
+    } catch {}
+
+    if (!base && fallbackBase) base = fallbackBase
+    const derived = base ? deriveChromeColors(base) : null
+
+    if (derived) {
+      root.style.setProperty('--chrome-bg', derived.chromeBg)
+      root.style.setProperty('--chrome-panel-bg', derived.chromePanelBg)
+    } else {
+      root.style.removeProperty('--chrome-bg')
+      root.style.removeProperty('--chrome-panel-bg')
+    }
+  } catch {}
+}
+
 export function applyThemePrefs(prefs: ThemePrefs): void {
   try {
     const c = getContainer()
@@ -92,6 +180,10 @@ export function applyThemePrefs(prefs: ThemePrefs): void {
       c.style.setProperty('--preview-bg', prefs.readBg)
       c.style.setProperty('--wysiwyg-bg', prefs.wysiwygBg)
     }
+
+    // 统一在容器更新完背景变量之后，再基于“实际背景色”推导外圈 UI 颜色
+    // 这样无论当前是编辑 / 所见 / 阅读模式，只要容器背景变化，1/2/3 区域都会跟随
+    updateChromeColorsFromContainer(c, isDarkMode ? (prefs.editBgDark || DEFAULT_PREFS.editBgDark) : prefs.editBg)
 
     // 阅读模式"纯白背景"特殊处理：当阅读背景为纯白且非夜间模式时，移除羊皮纸纹理，让预览真正呈现纯白纸面
     try {
@@ -223,6 +315,15 @@ function registerMdStyle(id: MdStyleId, label: string, css?: string): void {
 
 export const themeAPI = { registerTheme, registerPalette, registerTypography, registerMdStyle, applyThemePrefs, loadThemePrefs, saveThemePrefs }
 ;(window as any).flymdTheme = themeAPI
+
+// 监听模式切换事件（编辑 / 阅读 / 所见），在模式变化时也重新推导一遍外圈 UI 颜色
+try {
+  window.addEventListener('flymd:mode:changed', () => {
+    const c = getContainer()
+    if (!c) return
+    updateChromeColorsFromContainer(c)
+  })
+} catch {}
 
 // ===== 主题 UI =====
 

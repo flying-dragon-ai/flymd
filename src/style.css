@@ -190,15 +190,15 @@ body[data-scrollbar-visible="true"] .library {
 }
 
 .titlebar {
-  height: 36px;
-  min-height: 36px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: stretch;
-  -webkit-app-region: drag;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-}
+    height: 36px;
+    min-height: 36px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: stretch;
+    -webkit-app-region: drag;
+    background: var(--chrome-bg, var(--bg));
+    border-bottom: 1px solid var(--border);
+  }
 
 /* 菜单栏样式 - 类似 Windows 记事本 */
 .menubar {
@@ -1118,13 +1118,13 @@ body > .block-menu { display: none !important; }
 
 /* 文档库侧栏 */
 .library {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 280px;
-  background: var(--panel-bg);
-  color: var(--fg);
-  overflow-y: auto;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    background: var(--chrome-panel-bg, var(--panel-bg));
+    color: var(--fg);
+    overflow-y: auto;
   overflow-x: hidden;
   z-index: 15;
 }
@@ -1148,7 +1148,7 @@ body > .block-menu { display: none !important; }
 .library.side-right.hidden {
   transform: translateX(100%);
 }
-.library .lib-header { position: sticky; top: 0; background: var(--panel-bg); border-bottom: none; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; z-index: 1; }
+.library .lib-header { position: sticky; top: 0; background: var(--chrome-panel-bg, var(--panel-bg)); border-bottom: none; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; z-index: 1; }
 .library .lib-title-row { display: flex; align-items: center; gap: 10px; padding-bottom: 2px; }
 .library .lib-choose-btn { -webkit-app-region: no-drag; cursor: pointer; border: none; background: transparent; color: var(--muted); padding: 4px 8px; font-size: 13px; flex-shrink: 0; }
 .library .lib-choose-btn:hover { color: var(--fg); }
@@ -1182,7 +1182,7 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   z-index: 14;
   overflow-y: auto;
   overflow-x: hidden;
-  background: var(--panel-bg);
+    background: var(--chrome-panel-bg, var(--panel-bg));
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
 }
@@ -4613,7 +4613,7 @@ body.dark-mode {
 
 /* 夜间模式 - 标题栏和菜单 */
 body.dark-mode .menubar {
-  background: #0f1114 !important;
+    background: var(--chrome-bg, #0f1114) !important;
   border-bottom-color: #2d3748 !important;
 }
 
@@ -4629,20 +4629,20 @@ body.dark-mode .menubar .menu-btn:hover {
 
 /* 夜间模式 - 侧边栏/库管理 */
 body.dark-mode .sidebar,
-body.dark-mode .library-sidebar,
-body.dark-mode .file-tree,
-body.dark-mode [class*="sidebar"],
-body.dark-mode [class*="library"],
-body.dark-mode [class*="lib-"],
-body.dark-mode .left-panel,
-body.dark-mode .panel-left,
-body.dark-mode [class*="left-panel"],
-body.dark-mode [class*="panel-left"],
-body.dark-mode .container > div:first-child {
-  background: #0f1114 !important;
-  border-color: #2d3748 !important;
-  color: #e5e7eb !important;
-}
+  body.dark-mode .library-sidebar,
+  body.dark-mode .file-tree,
+  body.dark-mode [class*="sidebar"],
+  body.dark-mode [class*="library"],
+  body.dark-mode [class*="lib-"],
+  body.dark-mode .left-panel,
+  body.dark-mode .panel-left,
+  body.dark-mode [class*="left-panel"],
+  body.dark-mode [class*="panel-left"],
+  body.dark-mode .container > div:first-child {
+    background: var(--chrome-panel-bg, #0f1114) !important;
+    border-color: #2d3748 !important;
+    color: #e5e7eb !important;
+  }
 
 body.dark-mode .sidebar-item,
 body.dark-mode .tree-item,
@@ -5163,8 +5163,8 @@ body.dark-mode .preview hr {
 }
 
 .context-menu-item:hover:not(.disabled) {
-  background: var(--panel-bg);
-}
+    background: var(--chrome-panel-bg, var(--panel-bg));
+  }
 
 .context-menu-item:active:not(.disabled) {
   background: var(--border);
@@ -5597,10 +5597,10 @@ body.focus-mode.custom-titlebar-active .focus-trigger-zone {
 }
 
 .tabbar {
-  display: flex;
-  align-items: center;
-  height: 32px;
-  background: var(--bg);
+    display: flex;
+    align-items: center;
+    height: 32px;
+    background: var(--chrome-bg, var(--bg));
   border-bottom: 1px solid var(--border);
   padding: 0 4px;
   user-select: none;
@@ -5647,7 +5647,7 @@ body.focus-mode.custom-titlebar-active .focus-trigger-zone {
 }
 
 .tabbar-tab.active {
-  background: var(--panel-bg);
+    background: var(--chrome-panel-bg, var(--panel-bg));
   color: var(--fg);
 }
 
@@ -5776,8 +5776,8 @@ body.focus-mode.custom-titlebar-active .focus-trigger-zone {
 }
 
 .tabbar-context-item:hover {
-  background: var(--panel-bg);
-}
+    background: var(--chrome-panel-bg, var(--panel-bg));
+  }
 
 /* 深色模式下活跃标签指示线颜色 */
 @media (prefers-color-scheme: dark) {
@@ -5793,11 +5793,11 @@ body.focus-mode.custom-titlebar-active .focus-trigger-zone {
 
 /* 夜间模式 - 标签栏 */
 body.dark-mode .tabbar {
-  background: #0b0c0e !important;
-}
+    background: var(--chrome-bg, #0b0c0e) !important;
+  }
 
 body.dark-mode .tabbar-tab.active {
-  background: #1f2937 !important;
+    background: var(--chrome-panel-bg, #1f2937) !important;
   color: #e5e7eb !important;
 }
 

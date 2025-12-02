@@ -1004,21 +1004,23 @@ async function downloadSinglePost(context, post) {
     const dateStr = isNaN(dt.getTime()) ? '' : `${y}-${m}-${day}`
     const filename = buildDownloadFilename(cid, title, dateStr)
 
-    const base = await getCurrentBaseDir(context)
-    if (!base) {
-      context.ui.notice('无法确定下载目录：请先打开一个本地文档，或在设置中配置默认粘贴目录后重试。', 'err', 3000)
-      return
-    }
-    let baseDir = base
-    if (sessionState.settings.alwaysUseDefaultDir && sessionState.settings.defaultDownloadDir) {
-      const cfgDir = String(sessionState.settings.defaultDownloadDir || '').trim()
-      if (cfgDir) {
-        // 简单判断：以盘符/根路径/UNC 开头时视为绝对路径，否则视为相对基准目录
-        if (/^[a-zA-Z]:[\\/]/.test(cfgDir) || /^\\\\/.test(cfgDir) || /^\//.test(cfgDir)) {
-          baseDir = cfgDir
-        } else {
-          baseDir = joinPath(base, cfgDir)
-        }
+    const cfgDirRaw = String(sessionState.settings.defaultDownloadDir || '').trim()
+    const useDefaultDir = sessionState.settings.alwaysUseDefaultDir && !!cfgDirRaw
+    const isAbsCfg = !!cfgDirRaw && (/^[a-zA-Z]:[\\/]/.test(cfgDirRaw) || /^\\\\/.test(cfgDirRaw) || /^\//.test(cfgDirRaw))
+
+    let baseDir = ''
+    if (useDefaultDir && isAbsCfg) {
+      // 绝对路径：直接作为最终下载目录，不依赖当前文档
+      baseDir = cfgDirRaw
+    } else {
+      const base = await getCurrentBaseDir(context)
+      if (!base) {
+        context.ui.notice('无法确定下载目录：请先打开一个本地文档，或在设置中配置默认粘贴目录后重试。', 'err', 3000)
+        return
+      }
+      baseDir = base
+      if (useDefaultDir) {
+        baseDir = joinPath(base, cfgDirRaw)
       }
     }
     const fullPath = joinPath(baseDir, filename)
@@ -1026,6 +1028,8 @@ async function downloadSinglePost(context, post) {
     const categories = Array.isArray(cats)
       ? cats.map((x) => String(x || '').trim()).filter(Boolean)
       : (cats ? [String(cats || '').trim()] : [])
+
+    const safeSlug = slug || String(cid)
 
     const fm = {
       title,

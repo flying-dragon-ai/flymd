@@ -4546,7 +4546,8 @@ async function insertLink() {
     const preset = selectedText || '链接文本'
     const result = await openLinkDialog(preset, 'https://')
     if (!result || !result.url) return
-    await wysiwygV2ApplyLink(result.url)
+    // 所见模式：传入 label，让内部根据“是否有选区”决定是覆盖选区还是插入一段新文本
+    await wysiwygV2ApplyLink(result.url, result.label)
     return
   }
   const start = editor.selectionStart

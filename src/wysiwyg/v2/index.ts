@@ -1141,16 +1141,63 @@ export async function wysiwygV2ToggleItalic() {
     }
   })
 }
-export async function wysiwygV2ApplyLink(href: string, title?: string) {
+// 所见模式链接应用：
+// - 兼容旧签名：wysiwygV2ApplyLink(href, title?)
+// - 新用法：wysiwygV2ApplyLink(href, label) —— 在无选区时插入带文本的链接，有选区时用 label 覆盖选中文本
+export async function wysiwygV2ApplyLink(href: string, labelOrTitle?: string, maybeTitle?: string) {
   if (!_editor) return
   const { toggleLinkCommand, updateLinkCommand } = await import('@milkdown/preset-commonmark')
   await _editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx)
     const commands = ctx.get(commandsCtx)
-    // 优先：尝试对选区插入/切换链接
-    if (!commands.call((toggleLinkCommand as any).key, { href, title })) {
-      // 其次：若已存在 mark，则尝试在当前 mark 上更新
-      commands.call((updateLinkCommand as any).key, { href, title })
+    const { state } = view
+    const { empty } = state.selection as any
+    const hadRange = !empty
+
+    // 兼容：如果传入了第三个参数，则视为旧签名 (href, title)
+    const hasTitle = typeof maybeTitle === 'string'
+    const title = hasTitle ? (labelOrTitle as string | undefined) : (maybeTitle as string | undefined)
+    const label = hasTitle ? undefined : (labelOrTitle as string | undefined)
+
+    const schema = state.schema as any
+    const linkType = schema.marks?.link
+    const attrs: any = title ? { href, title } : { href }
+
+    // 新行为：提供了 label 时，统一用 replaceSelectionWith 插入一整个带 link mark 的文本节点
+    // 这样不会出现“最后一个字符漏掉”的偏移问题，同时兼容“有选区”和“无选区”两种情况
+    if (typeof label === 'string' && label && linkType) {
+      try {
+        let tr = state.tr
+        const textNode = schema.text(label, [linkType.create(attrs)])
+        // 无论是否有选区，直接用链接文本替换当前选区 / 光标位置
+        tr = tr.replaceSelectionWith(textNode, false)
+        // 将光标放到插入文本的末尾，避免继续输入覆盖选中文本
+        const pos = tr.selection.to >>> 0
+        tr = tr.setSelection(TextSelection.create(tr.doc, pos))
+        // 关键：清空 storedMarks，避免后续输入继续继承链接样式
+        try { (tr as any).setStoredMarks([]) } catch {}
+        view.dispatch(tr.scrollIntoView())
+        return
+      } catch {
+        // 若手工事务失败，兜底退回旧逻辑
+      }
     }
+
+    // 旧行为（无 label）：调用 Milkdown 内置命令，并在“有选区”时把光标移到链接之后
+    if (!commands.call((toggleLinkCommand as any).key, attrs)) {
+      commands.call((updateLinkCommand as any).key, attrs)
+      return
+    }
+    try {
+      const st2 = view.state
+      if (!st2.selection.empty) {
+        const pos = st2.selection.to >>> 0
+        const safePos = Math.max(0, Math.min(st2.doc.content.size, pos))
+        let tr = st2.tr.setSelection(TextSelection.create(st2.doc, safePos))
+        try { (tr as any).setStoredMarks([]) } catch {}
+        view.dispatch(tr.scrollIntoView())
+      }
+    } catch {}
   })
 }
 

@@ -1507,7 +1507,7 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     }
 
     // 并发控制：将任务分组并发执行
-    const CONCURRENCY = 5  // 同时处理5个文件
+    const CONCURRENCY = 8  // 同时处理8个文件
     const processTask = async (act: typeof plan[0]) => {
       if (Date.now() > deadline) {
         await syncLog('[timeout] 超时中断')

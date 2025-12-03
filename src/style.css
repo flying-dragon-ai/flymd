@@ -60,6 +60,7 @@ html, body {
 body {
   background: var(--bg);
   color: var(--fg);
+  font-family: var(--font-ui, inherit);
   /* 改进字体渲染 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

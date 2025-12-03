@@ -1048,7 +1048,7 @@ function ensureCss() {
     '.msg.a .ai-md-content a{color:#2563eb;text-decoration:none}',
     '.msg.a .ai-md-content a:hover{text-decoration:underline}',
     '#ai-assist-win.dark .msg.a .ai-md-content a{color:#60a5fa}',
-    '.msg.a .ai-md-content code{background:var(--code-bg,#f6f8fa);padding:0.15em 0.4em;border-radius:4px;font-size:0.9em;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}',
+    '.msg.a .ai-md-content code{background:var(--code-bg,#f6f8fa);padding:0.15em 0.4em;border-radius:4px;font-size:0.9em;font-family:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace)}',
     '#ai-assist-win.dark .msg.a .ai-md-content code{background:var(--code-bg,#1a1b1e)}',
     '.msg.a .ai-md-content hr{border:none;border-top:1px solid var(--border,#e5e7eb);margin:1em 0}',
     '#ai-assist-win.dark .msg.a .ai-md-content hr{border-top-color:var(--border,#374151)}',

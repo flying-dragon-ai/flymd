@@ -27,6 +27,8 @@ export interface ThemePrefs {
   themeId?: string
   /** 自定义正文字体（预览/WYSIWYG 正文），为空则使用默认/排版风格 */
   bodyFont?: string
+  /** 正文字体是否作用于整个界面 UI（菜单 / 按钮 / 插件容器等） */
+  bodyFontGlobal?: boolean
   /** 自定义等宽字体（编辑器与代码），为空则使用系统等宽栈 */
   monoFont?: string
   /** 编辑模式网格背景 */
@@ -232,10 +234,29 @@ export function applyThemePrefs(prefs: ThemePrefs): void {
     try {
       const bodyFont = (prefs.bodyFont || '').trim()
       const monoFont = (prefs.monoFont || '').trim()
+      const root = document.body
+
+      // 容器内的正文 / 等宽字体
       if (bodyFont) c.style.setProperty('--font-body', bodyFont)
       else c.style.removeProperty('--font-body')
       if (monoFont) c.style.setProperty('--font-mono', monoFont)
       else c.style.removeProperty('--font-mono')
+
+      // 将需要的字体变量同步到 body，供全局 UI / 插件容器使用
+      if (root) {
+        // 正文字体全局生效：仅在用户显式开启且配置了 bodyFont 时，才覆盖 UI 字体变量
+        if (prefs.bodyFontGlobal && bodyFont) {
+          root.style.setProperty('--font-ui', bodyFont)
+        } else {
+          root.style.removeProperty('--font-ui')
+        }
+        // 等宽字体始终同步，用于全局代码块（编辑器 / 预览 / 插件等）
+        if (monoFont) {
+          root.style.setProperty('--font-mono', monoFont)
+        } else {
+          root.style.removeProperty('--font-mono')
+        }
+      }
     } catch {}
 
     // 排版：通过类名挂到 .container 上，覆盖 .preview-body 与 .ProseMirror
@@ -291,6 +312,7 @@ export function loadThemePrefs(): ThemePrefs {
       mdStyle: (['standard','github','notion','journal','card','docs','typora','obsidian','bear','minimalist'] as string[]).includes(mdStyle) ? mdStyle : 'standard',
       themeId: obj.themeId || undefined,
       bodyFont: (typeof obj.bodyFont === 'string') ? obj.bodyFont : undefined,
+      bodyFontGlobal: (typeof obj.bodyFontGlobal === 'boolean') ? obj.bodyFontGlobal : false,
       monoFont: (typeof obj.monoFont === 'string') ? obj.monoFont : undefined,
       gridBackground: (typeof obj.gridBackground === 'boolean') ? obj.gridBackground : false,
       folderIcon: (typeof obj.folderIcon === 'string') ? obj.folderIcon : '🗂️',
@@ -539,9 +561,13 @@ function createPanel(): HTMLDivElement {
         <select id="font-body-select"></select>
         <label for="font-mono-select">等宽字体</label>
         <select id="font-mono-select"></select>
-        <div class="font-actions">
       </div>
-    </div>
+      <div class="theme-option">
+        <label class="theme-checkbox-label">
+          <input type="checkbox" id="font-body-global-toggle" class="theme-checkbox" />
+          <span>正文字体全局生效（包括菜单和插件）</span>
+        </label>
+      </div>
     </div>
   `
   return panel
@@ -645,6 +671,7 @@ export function initThemeUI(): void {
     const bodySel = panel.querySelector('#font-body-select') as HTMLSelectElement | null
     const monoSel = panel.querySelector('#font-mono-select') as HTMLSelectElement | null
     const resetBtn = panel.querySelector('#font-reset') as HTMLButtonElement | null
+    const bodyGlobalToggle = panel.querySelector('#font-body-global-toggle') as HTMLInputElement | null
     const fontsWrap = panel.querySelector('.theme-fonts') as HTMLDivElement | null
     // 构造“安装字体”按钮并重组操作区（避免直接改 HTML 模板造成编码问题）
     let installBtn: HTMLButtonElement | null = null
@@ -724,6 +751,8 @@ export function initThemeUI(): void {
     }
     rebuildFontSelects(prefs)
 
+    if (bodyGlobalToggle) bodyGlobalToggle.checked = !!prefs.bodyFontGlobal
+
     function applyBodyFont(v: string) {
       const cur = loadThemePrefs()
       cur.bodyFont = v || undefined
@@ -741,13 +770,22 @@ export function initThemeUI(): void {
 
     if (bodySel) bodySel.addEventListener('change', () => applyBodyFont(bodySel!.value))
     if (monoSel) monoSel.addEventListener('change', () => applyMonoFont(monoSel!.value))
+    if (bodyGlobalToggle) bodyGlobalToggle.addEventListener('change', () => {
+      const cur = loadThemePrefs()
+      cur.bodyFontGlobal = bodyGlobalToggle.checked
+      saveThemePrefs(cur)
+      applyThemePrefs(cur)
+      lastSaved = { ...cur }
+    })
     if (resetBtn) resetBtn.addEventListener('click', () => {
       const cur = loadThemePrefs()
       cur.bodyFont = undefined
       cur.monoFont = undefined
+      cur.bodyFontGlobal = false
       saveThemePrefs(cur)
       applyThemePrefs(cur)
       rebuildFontSelects(cur)
+      if (bodyGlobalToggle) bodyGlobalToggle.checked = false
       lastSaved = { ...cur }
     })
 

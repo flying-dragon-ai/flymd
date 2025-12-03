@@ -637,6 +637,8 @@ let _extListHost: HTMLDivElement | null = null
 let _extInstallInput: HTMLInputElement | null = null
 let _extMarketSearchText = ''
 let _extLastMarketItems: InstallableItem[] = []
+let _extUpdatesOnly = false  // 是否仅显示可更新扩展（已安装区块过滤）
+let _extGlobalOrder: Record<string, number> = {} // 扩展卡片的统一排序顺序（与安装状态无关）
 let _extOverlayRenderedOnce = false  // 扩展面板是否已完成过首次渲染（用于避免每次打开都全量刷新）
 let _extApplyMarketFilter: ((itemsOverride?: InstallableItem[] | null) => Promise<void>) | null = null  // 背景静默更新市场列表时复用的过滤函数
 
@@ -1728,6 +1730,39 @@ type InstallableItem = {
   author?: string
   homepage?: string
   install: { type: 'github' | 'manifest'; ref: string }
+}
+
+// 扩展市场统一排序规则：
+// 1) 推荐（featured）永远排在最前面
+// 2) 其余按名称首字母 A-Z 排序（不再使用 rank）
+function compareInstallableItems(a: any, b: any): number {
+  try {
+    const fa = a && (a.featured === true ? 1 : 0)
+    const fb = b && (b.featured === true ? 1 : 0)
+    if (fb !== fa) return fb - fa
+    const na = String(a?.name || a?.id || '')
+    const nb = String(b?.name || b?.id || '')
+    return na.localeCompare(nb, 'en', { sensitivity: 'base' })
+  } catch {
+    return 0
+  }
+}
+
+// 获取扩展卡片在统一网格中的排序序号（越小越靠前）
+function getPluginOrder(id: string, name?: string, bias = 0): number {
+  try {
+    const key = id || ''
+    if (key && Object.prototype.hasOwnProperty.call(_extGlobalOrder, key)) {
+      return _extGlobalOrder[key]
+    }
+    const base = 50_000 + bias
+    const label = String(name || id || '').toLowerCase()
+    if (!label) return base
+    const ch = label.charCodeAt(0)
+    return base + (Number.isFinite(ch) ? ch : 0)
+  } catch {
+    return 99_999
+  }
 }
 
 // 兜底列表：保留现有硬编码单条，作为无网/源失败时的默认项
@@ -11812,19 +11847,9 @@ async function loadInstallablePlugins(force = false): Promise<InstallableItem[]>
       ttlMs = Math.max(10_000, Math.min(24 * 3600_000, (json.ttlSeconds ?? 3600) * 1000))
       let items = (json.items ?? [])
         .filter((x: any) => x && typeof x.id === 'string' && x.install && (x.install.type === 'github' || x.install.type === 'manifest') && typeof x.install.ref === 'string')
-      // 推荐优先，其次 rank 越小越靠前，其次按名称
+      // 推荐优先，其次按名称首字母 A-Z 排序（不再依赖 rank）
       try {
-        items = items.sort((a: any, b: any) => {
-          const fa = a && (a.featured === true ? 1 : 0)
-          const fb = b && (b.featured === true ? 1 : 0)
-          if (fb !== fa) return fb - fa
-          const ra = Number.isFinite(a?.rank) ? a.rank : 9999
-          const rb = Number.isFinite(b?.rank) ? b.rank : 9999
-          if (ra !== rb) return ra - rb
-          const na = String(a?.name || a?.id || '')
-          const nb = String(b?.name || b?.id || '')
-          return na.localeCompare(nb)
-        })
+        items = items.sort(compareInstallableItems)
       } catch {}
       items = items.slice(0, 100)
       if (store) {
@@ -11843,7 +11868,8 @@ async function loadInstallablePlugins(force = false): Promise<InstallableItem[]>
     if (resp && resp.ok) {
       const text = await resp.text()
       const json = JSON.parse(text)
-      const items = Array.isArray(json?.items) ? json.items : []
+      let items = Array.isArray(json?.items) ? json.items : []
+      try { items = items.sort(compareInstallableItems) } catch {}
       if (items.length > 0) return items as InstallableItem[]
     }
   } catch {}
@@ -12710,7 +12736,7 @@ function renderInstalledExtensions(
 
   // 根据当前搜索关键字过滤已安装扩展（名称 / id / 描述）
   const keywordRaw = (_extMarketSearchText || '').trim().toLowerCase()
-  const arr = Object.values(installedMap).filter((p) => {
+  let arr = Object.values(installedMap).filter((p) => {
     if (!keywordRaw) return true
     try {
       const parts: string[] = []
@@ -12725,10 +12751,27 @@ function renderInstalledExtensions(
     }
   })
 
+  // “可更新”过滤：仅显示有更新版本的已安装扩展
+  if (_extUpdatesOnly) {
+    arr = arr.filter((p) => !!updateMap[p.id])
+  }
+
+  // 排序规则：按名称首字母 A-Z 排序（与市场保持一致，不受安装顺序影响）
+  arr = arr.slice().sort((a, b) => {
+    const na = String(a?.name || a?.id || '')
+    const nb = String(b?.name || b?.id || '')
+    // 优先使用统一 order 值，其次按名称 A-Z
+    const oa = getPluginOrder(a.id, na)
+    const ob = getPluginOrder(b.id, nb)
+    if (oa !== ob) return oa - ob
+    return na.localeCompare(nb, 'en', { sensitivity: 'base' })
+  })
+
   for (const p of arr) {
     const row = document.createElement('div')
     row.className = 'ext-item'
     row.setAttribute('data-type', 'installed')
+    try { row.style.order = String(getPluginOrder(p.id, p.name || p.id)) } catch {}
     const meta = document.createElement('div'); meta.className = 'ext-meta'
     const name = document.createElement('div'); name.className = 'ext-name'
     const nameText = document.createElement('span')
@@ -12919,11 +12962,34 @@ async function refreshExtensionsUI(): Promise<void> {
     void applyMarketFilter()
   })
   const installedOnlyLabel = document.createElement('span')
-  installedOnlyLabel.textContent = '仅显示已安装'
+  installedOnlyLabel.textContent = '已安装'
   installedOnlyLabel.style.fontSize = '12px'
   installedOnlyWrap.appendChild(installedOnlyCheckbox)
   installedOnlyWrap.appendChild(installedOnlyLabel)
   hd.appendChild(installedOnlyWrap)
+
+  // 仅显示“可更新”的已安装扩展
+  const updatesOnlyWrap = document.createElement('label')
+  updatesOnlyWrap.className = 'ext-market-channel'
+  updatesOnlyWrap.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer'
+  const updatesOnlyCheckbox = document.createElement('input')
+  updatesOnlyCheckbox.type = 'checkbox'
+  updatesOnlyCheckbox.id = 'ext-updates-only'
+  updatesOnlyCheckbox.checked = _extUpdatesOnly
+  updatesOnlyCheckbox.style.cursor = 'pointer'
+  updatesOnlyCheckbox.addEventListener('change', () => {
+    _extUpdatesOnly = updatesOnlyCheckbox.checked
+    void (async () => {
+      try { await refreshInstalledExtensionsUI() } catch {}
+      try { await applyMarketFilter() } catch {}
+    })()
+  })
+  const updatesOnlyLabel = document.createElement('span')
+  updatesOnlyLabel.textContent = '可更新'
+  updatesOnlyLabel.style.fontSize = '12px'
+  updatesOnlyWrap.appendChild(updatesOnlyCheckbox)
+  updatesOnlyWrap.appendChild(updatesOnlyLabel)
+  hd.appendChild(updatesOnlyWrap)
 
   // 渠道选择：GitHub / 官网
   const channelWrap = document.createElement('div')
@@ -13000,6 +13066,7 @@ async function refreshExtensionsUI(): Promise<void> {
     const row = document.createElement('div')
     row.className = 'ext-item'
     row.setAttribute('data-type', 'builtin')
+    try { row.style.order = String(getPluginOrder(b.id, b.name, -1000)) } catch {}
     const meta = document.createElement('div'); meta.className = 'ext-meta'
     const name = document.createElement('div'); name.className = 'ext-name'
     const nameText = document.createElement('span')
@@ -13052,8 +13119,13 @@ async function refreshExtensionsUI(): Promise<void> {
       const marketRows = unifiedList.querySelectorAll('[data-type="market"]')
       marketRows.forEach(r => r.remove())
 
+      // 如果处于“仅显示已安装”或“仅显示可更新”模式，则不渲染市场扩展
+      if (installedOnlyCheckbox.checked || _extUpdatesOnly) {
+        return
+      }
+
       const base = Array.isArray(itemsOverride) ? itemsOverride : marketItems
-      const source = Array.isArray(base) ? base : []
+      let source = Array.isArray(base) ? base : []
       if (!source || source.length === 0) {
         const loadingRow = document.createElement('div')
         loadingRow.className = 'ext-item'
@@ -13103,6 +13175,11 @@ async function refreshExtensionsUI(): Promise<void> {
         })
       }
 
+      // 排序：推荐优先，其次按名称首字母 A-Z（与索引加载时保持一致，确保在过滤后顺序稳定）
+      try {
+        items = items.slice().sort(compareInstallableItems)
+      } catch {}
+
       if (!items.length) {
         // 如果已安装/内置扩展中仍有条目（可能匹配当前搜索），就不要再显示“没有匹配”的提示
         const hasOtherRows = unifiedList.querySelector('[data-type=\"installed\"], [data-type=\"builtin\"]')
@@ -13125,6 +13202,7 @@ async function refreshExtensionsUI(): Promise<void> {
         const meta = document.createElement('div'); meta.className = 'ext-meta'
         const name = document.createElement('div'); name.className = 'ext-name'
         const fullName = String(it.name || it.id)
+        try { row.style.order = String(getPluginOrder(String(it.id || ''), fullName)) } catch {}
         const spanName = document.createElement('span')
         spanName.textContent = fullName
         spanName.title = fullName  // 悬浮显示完整名称
@@ -13207,6 +13285,24 @@ async function refreshExtensionsUI(): Promise<void> {
   }
 
   _extLastMarketItems = marketItems
+  // 基于当前市场索引构建统一排序顺序（推荐优先 + 名称 A-Z），与安装状态解耦
+  _extGlobalOrder = {}
+  try {
+    const sortedForOrder = (marketItems || []).slice().sort(compareInstallableItems)
+    let idx = 0
+    for (const it of sortedForOrder) {
+      if (!it || !it.id) continue
+      _extGlobalOrder[it.id] = 100 + idx++
+    }
+  } catch {}
+  // 内置扩展固定靠前，但保留相对顺序
+  try {
+    let idx = 0
+    for (const b of builtinPlugins) {
+      if (!b || !b.id) continue
+      _extGlobalOrder[b.id] = idx++
+    }
+  } catch {}
   // 记录供后台静默刷新重用的过滤函数（复用当前 unifiedList / 控件状态）
   _extApplyMarketFilter = applyMarketFilter
 

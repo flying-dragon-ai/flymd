@@ -1152,7 +1152,7 @@ body > .block-menu { display: none !important; }
 }
 .library .lib-header { position: sticky; top: 0; background: var(--chrome-panel-bg, var(--panel-bg)); border-bottom: none; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; z-index: 1; }
 .library .lib-title-row { display: flex; align-items: center; gap: 10px; padding-bottom: 2px; }
-.library .lib-choose-btn { -webkit-app-region: no-drag; cursor: pointer; border: none; background: transparent; color: var(--muted); padding: 4px 8px; font-size: 13px; flex-shrink: 0; }
+.library .lib-choose-btn { -webkit-app-region: no-drag; cursor: pointer; border: none; background: transparent; color: var(--muted); padding: 4px 8px; font-size: 13px; flex-shrink: 0; font-family: inherit; }
 .library .lib-choose-btn:hover { color: var(--fg); }
 .library .lib-name { flex: 1; color: var(--fg); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; font-weight: 600; padding-left: 4px; opacity: 0.9; }
 .library .lib-toggle-btn { -webkit-app-region: no-drag; cursor: pointer; border: none; background: none; color: var(--fg); font-size: 18px; width: 30px; height: 30px; display: none; align-items: center; justify-content: center; border-radius: 4px; margin: 0 2px; padding: 0; line-height: 1; opacity: 0.5; font-family: monospace; flex-shrink: 0; }
@@ -1164,7 +1164,7 @@ body.focus-mode .library .lib-toggle-btn { display: flex; }
 .lib-float-toggle:hover { opacity: 0.8; }
 body.focus-mode .lib-float-toggle.show { display: flex; }
 .library .lib-actions { display: flex; align-items: center; gap: 12px; }
-.library .lib-action-btn { -webkit-app-region: no-drag; cursor: pointer; border: none; background: transparent; color: var(--muted); padding: 4px 8px; font-size: 12px; flex: 1; text-align: center; white-space: nowrap; }
+.library .lib-action-btn { -webkit-app-region: no-drag; cursor: pointer; border: none; background: transparent; color: var(--muted); padding: 4px 8px; font-size: 12px; flex: 1; text-align: center; white-space: nowrap; font-family: inherit; }
 .library .lib-action-btn:hover { color: var(--fg); }
 .library .lib-action-btn.active { color: var(--fg); font-weight: 500; }
 .library .hidden { display: none !important; }

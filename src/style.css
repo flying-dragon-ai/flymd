@@ -2027,7 +2027,8 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 }
 
 .theme-toggle-label.theme-toggle-third {
-  width: calc(25% - 6px);
+  /* 5 个开关一行，减去 4 个 8px 的间距后平均分配 */
+  width: calc((100% - 32px) / 5);
   gap: 8px;
 }
 

@@ -535,6 +535,13 @@ function createPanel(): HTMLDivElement {
             <span class="theme-toggle-slider"></span>
           </div>
         </label>
+        <label class="theme-toggle-label theme-toggle-third theme-toggle-boxed" for="sourcemode-default-toggle">
+          <span class="theme-toggle-text">源码模式</span>
+          <div class="theme-toggle-switch">
+            <input type="checkbox" id="sourcemode-default-toggle" class="theme-toggle-input" />
+            <span class="theme-toggle-slider"></span>
+          </div>
+        </label>
         <label class="theme-toggle-label theme-toggle-third theme-toggle-boxed" for="dark-mode-toggle">
           <span class="theme-toggle-text">夜间模式</span>
           <div class="theme-toggle-switch">
@@ -1403,30 +1410,85 @@ export function initThemeUI(): void {
       })
     }
 
-    // 默认使用所见模式开关
+    // 默认模式相关开关（所见 / 源码）
     const wysiwygDefaultToggle = panel.querySelector('#wysiwyg-default-toggle') as HTMLInputElement | null
+    const sourcemodeDefaultToggle = panel.querySelector('#sourcemode-default-toggle') as HTMLInputElement | null
+
+    const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
+    const SOURCEMODE_DEFAULT_KEY = 'flymd:sourcemode:default'
+
+    const getWysiwygDefault = (): boolean => {
+      try {
+        const v = localStorage.getItem(WYSIWYG_DEFAULT_KEY)
+        return v === 'true'
+      } catch { return false }
+    }
+
+    const setWysiwygDefault = (enabled: boolean) => {
+      try {
+        localStorage.setItem(WYSIWYG_DEFAULT_KEY, enabled ? 'true' : 'false')
+        const ev = new CustomEvent('flymd:wysiwyg:default', { detail: { enabled } })
+        window.dispatchEvent(ev)
+      } catch {}
+    }
+
+    const getSourcemodeDefault = (): boolean => {
+      try {
+        const v = localStorage.getItem(SOURCEMODE_DEFAULT_KEY)
+        return v === 'true'
+      } catch { return false }
+    }
+
+    const setSourcemodeDefault = (enabled: boolean) => {
+      try {
+        localStorage.setItem(SOURCEMODE_DEFAULT_KEY, enabled ? 'true' : 'false')
+        const ev = new CustomEvent('flymd:sourcemode:default', { detail: { enabled } })
+        window.dispatchEvent(ev)
+      } catch {}
+    }
+
+    // 默认使用所见模式开关
     if (wysiwygDefaultToggle) {
-      // 从 localStorage 读取设置
-      const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
-      const getWysiwygDefault = (): boolean => {
-        try {
-          const v = localStorage.getItem(WYSIWYG_DEFAULT_KEY)
-          return v === 'true'
-        } catch { return false }
-      }
-      const setWysiwygDefault = (enabled: boolean) => {
-        try {
-          localStorage.setItem(WYSIWYG_DEFAULT_KEY, enabled ? 'true' : 'false')
-          // 触发事件，通知 main.ts
-          const ev = new CustomEvent('flymd:wysiwyg:default', { detail: { enabled } })
-          window.dispatchEvent(ev)
-        } catch {}
-      }
       // 初始化开关状态
       wysiwygDefaultToggle.checked = getWysiwygDefault()
       // 监听开关变化
       wysiwygDefaultToggle.addEventListener('change', () => {
-        setWysiwygDefault(wysiwygDefaultToggle.checked)
+        const enabled = wysiwygDefaultToggle.checked
+
+        // 互斥：所见模式打开时，强制关闭源码模式
+        if (enabled && sourcemodeDefaultToggle && sourcemodeDefaultToggle.checked) {
+          sourcemodeDefaultToggle.checked = false
+          try {
+            localStorage.setItem(SOURCEMODE_DEFAULT_KEY, 'false')
+            const ev = new CustomEvent('flymd:sourcemode:default', { detail: { enabled: false } })
+            window.dispatchEvent(ev)
+          } catch {}
+        }
+
+        setWysiwygDefault(enabled)
+      })
+    }
+
+    // 默认使用源码模式开关
+    if (sourcemodeDefaultToggle) {
+      // 初始化开关状态
+      sourcemodeDefaultToggle.checked = getSourcemodeDefault()
+
+      // 监听开关变化
+      sourcemodeDefaultToggle.addEventListener('change', () => {
+        const enabled = sourcemodeDefaultToggle.checked
+
+        // 互斥：源码模式打开时，强制关闭所见模式
+        if (enabled && wysiwygDefaultToggle && wysiwygDefaultToggle.checked) {
+          wysiwygDefaultToggle.checked = false
+          try {
+            localStorage.setItem(WYSIWYG_DEFAULT_KEY, 'false')
+            const ev = new CustomEvent('flymd:wysiwyg:default', { detail: { enabled: false } })
+            window.dispatchEvent(ev)
+          } catch {}
+        }
+
+        setSourcemodeDefault(enabled)
       })
     }
 

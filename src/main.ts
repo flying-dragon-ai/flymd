@@ -5703,6 +5703,20 @@ async function switchToPreviewAfterOpen() {
   try {
     // 所见模式会在外部显式关闭/重新开启，这里只负责普通预览
     if (wysiwyg) return
+
+    // 如果开启了“默认源码模式”，则保持源码编辑视图，不自动切到预览
+    try {
+      const SOURCEMODE_DEFAULT_KEY = 'flymd:sourcemode:default'
+      const sourcemodeDefault = localStorage.getItem(SOURCEMODE_DEFAULT_KEY) === 'true'
+      if (sourcemodeDefault) {
+        mode = 'edit'
+        try { preview.classList.add('hidden') } catch {}
+        try { syncToggleButton() } catch {}
+        try { notifyModeChange() } catch {}
+        return
+      }
+    } catch {}
+
     mode = 'preview'
     try { await renderPreview() } catch (e) { try { showError('预览渲染失败', e) } catch {} }
     try { preview.classList.remove('hidden') } catch {}
@@ -7172,6 +7186,32 @@ function initFocusModeEvents() {
       if (enabled !== wysiwyg) {
         await setWysiwygEnabled(enabled)
       }
+    } catch {}
+  })
+
+  // 源码模式默认开关：主题面板勾选后，立即切换当前模式
+  window.addEventListener('flymd:sourcemode:default', async (ev: Event) => {
+    try {
+      const detail = (ev as CustomEvent).detail || {}
+      const enabled = !!detail.enabled
+
+      // 便签模式下不自动切换
+      if (stickyNoteMode) return
+
+      if (enabled) {
+        // 启用源码模式：切换到 edit 模式，关闭所见模式
+        if (wysiwyg) {
+          await setWysiwygEnabled(false)
+        }
+        if (mode !== 'edit') {
+          mode = 'edit'
+          // 刷新UI
+          try { preview.classList.add('hidden') } catch {}
+          try { syncToggleButton() } catch {}
+          try { notifyModeChange() } catch {}
+        }
+      }
+      // 如果禁用源码模式，不做任何操作（保持当前模式）
     } catch {}
   })
 }
@@ -11434,8 +11474,14 @@ function bindEvents() {
     // 检查是否默认启用所见模式（便签模式下不启用，避免覆盖便签的阅读模式样式）
     try {
       const WYSIWYG_DEFAULT_KEY = 'flymd:wysiwyg:default'
+      const SOURCEMODE_DEFAULT_KEY = 'flymd:sourcemode:default'
       const wysiwygDefault = localStorage.getItem(WYSIWYG_DEFAULT_KEY) === 'true'
-      if (wysiwygDefault && !wysiwyg && !stickyNoteMode) {
+      const sourcemodeDefault = localStorage.getItem(SOURCEMODE_DEFAULT_KEY) === 'true'
+
+      // 若同时存在旧数据冲突，以“源码模式默认”为优先，确保语义明确
+      const shouldEnableWysiwyg = wysiwygDefault && !sourcemodeDefault
+
+      if (shouldEnableWysiwyg && !wysiwyg && !stickyNoteMode) {
         // 延迟一小段时间，确保编辑器已完全初始化
         setTimeout(async () => {
           try {

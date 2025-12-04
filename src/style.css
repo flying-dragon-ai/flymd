@@ -3698,6 +3698,7 @@ html, body { overflow: hidden; }
 }
 .container.wysiwyg-v2 .ProseMirror pre.code-block-wrapper .code-layers {
   position: relative;
+  min-height: 1.5em; /* 确保空代码块也有一行高度 */
 }
 .container.wysiwyg-v2 .ProseMirror pre.code-block-wrapper code {
   font-family: Consolas, Monaco, 'Courier New', monospace !important;

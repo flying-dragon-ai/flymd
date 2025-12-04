@@ -283,9 +283,18 @@
             rememberPrev(); return
           }
         }
+        // 反引号三连击：检测 ``` 触发代码块补全
+        if (inserted === '`' && a >= 2 && prev.slice(a - 2, a) === '``') {
+          const left = prev.slice(0, a - 2)
+          const right = prev.slice(prev.length - b)
+          const content = hadSel ? ('\n' + removed + '\n') : '\n\n'
+          ta.value = left + '```' + content + '```' + right
+          ta.selectionStart = ta.selectionEnd = left.length + 4
+          rememberPrev()
+          return
+        }
           const close = codeClose(inserted)
-          // 中文输入法下不处理反引号，避免与 ``` 代码块补全冲突
-          if (close && inserted !== '`') {
+          if (close) {
             if (hadSel) {
               ta.value = prev.slice(0, a) + inserted + removed + close + prev.slice(prev.length - b)
               // 环抱补全后光标移到闭合符号之后，而不是选中中间内容

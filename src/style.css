@@ -234,6 +234,15 @@ body[data-scrollbar-visible="true"] .library {
   -webkit-app-region: no-drag;
 }
 
+/* Windows 平台：移除原生边框后默认显示窗口控制按钮 */
+body.platform-windows.no-native-decorations .window-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 12px;
+  gap: 8px;
+}
+
 body.compact-titlebar .window-controls {
   display: flex;
   align-items: center;

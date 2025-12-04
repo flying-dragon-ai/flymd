@@ -1986,6 +1986,8 @@ performance.mark('flymd-dom-ready')
 
 // 初始化平台适配（Android 支持）
 initPlatformIntegration().catch((e) => console.error('[Platform] Initialization failed:', e))
+// 初始化平台类（用于 CSS 平台适配，Windows 显示窗口控制按钮）
+try { initPlatformClass() } catch {}
 // 应用已保存主题并挂载主题 UI
 try { applySavedTheme() } catch {}
 try { initThemeUI() } catch {}
@@ -7030,6 +7032,8 @@ async function applyWindowDecorations(): Promise<void> {
     const win = getCurrentWindow()
     const hideNative = focusMode || compactTitlebar
     await win.setDecorations(!hideNative)
+    // 同步更新 body class，用于 CSS 判断是否显示自定义窗口控制按钮
+    document.body.classList.toggle('no-native-decorations', hideNative)
   } catch (err) {
     console.warn('切换窗口装饰失败:', err)
   }
@@ -7171,6 +7175,19 @@ function initFocusModeEvents() {
     } catch {}
   })
 }
+
+// 平台类初始化：为 body 添加平台标识类，用于 CSS 平台适配
+function initPlatformClass() {
+  const platform = (navigator.platform || '').toLowerCase()
+  if (platform.includes('win')) {
+    document.body.classList.add('platform-windows')
+  } else if (platform.includes('mac')) {
+    document.body.classList.add('platform-mac')
+  } else if (platform.includes('linux')) {
+    document.body.classList.add('platform-linux')
+  }
+}
+
 // 窗口拖拽初始化：为 mac / Linux 上的紧凑标题栏补齐拖动支持
 function initWindowDrag() {
   const titlebar = document.querySelector('.titlebar') as HTMLElement | null

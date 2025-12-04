@@ -58,6 +58,8 @@ export class HighlightCodeBlockNodeView implements NodeView {
   private getPos: () => number | undefined
   private lastCode: string = ''
   private highlightTimer: number | null = null
+  // 监听 selectionchange，用于控制语言选择器显隐
+  private selectionListener: ((event: Event) => void) | null = null
 
   constructor(node: Node, view: EditorView, getPos: () => number | undefined) {
     this.node = node
@@ -99,6 +101,8 @@ export class HighlightCodeBlockNodeView implements NodeView {
 
     // 绑定语言选择器事件
     this.setupLangSelector()
+    // 绑定选区变化事件：光标离开当前代码块时隐藏语言选择器
+    this.setupLangVisibilityWatcher()
 
     // 创建高亮显示层（只读，显示高亮后的代码）
     // 放在底层，contentDOM 透明覆盖在上面
@@ -138,6 +142,53 @@ export class HighlightCodeBlockNodeView implements NodeView {
     requestAnimationFrame(() => {
       this.scheduleHighlight()
     })
+  }
+
+  // 根据当前选区决定是否显示语言选择器
+  private updateLangSelectorVisibility() {
+    const doc = this.view.dom.ownerDocument
+    const activeEl = doc.activeElement
+
+    // 如果当前焦点在语言选择器内部（输入框或下拉菜单），保持可见
+    if (activeEl && (activeEl === this.langInput || this.langSelector.contains(activeEl))) {
+      this.langSelector.style.visibility = 'visible'
+      return
+    }
+
+    // 编辑器整体失焦且焦点也不在语言选择器内时，直接隐藏
+    if (!this.view.hasFocus()) {
+      this.langSelector.style.visibility = 'hidden'
+      return
+    }
+
+    const pos = this.getPos()
+    if (typeof pos !== 'number') {
+      // 异常情况（装饰节点等），直接隐藏，避免报错
+      this.langSelector.style.visibility = 'hidden'
+      return
+    }
+
+    const { from } = this.view.state.selection
+    const nodeStart = pos
+    const nodeEnd = pos + this.node.nodeSize
+    const inThisNode = from >= nodeStart && from <= nodeEnd
+
+    this.langSelector.style.visibility = inThisNode ? 'visible' : 'hidden'
+  }
+
+  // 注册 selectionchange 监听，在光标离开代码块后隐藏语言选择器
+  private setupLangVisibilityWatcher() {
+    const doc = this.view.dom.ownerDocument
+    const handler = (event: Event) => {
+      // 只要选区变化就重新判断一次所在节点
+      this.updateLangSelectorVisibility()
+    }
+
+    doc.addEventListener('selectionchange', handler)
+    this.selectionListener = handler
+
+    // 初始化一次，保证首次渲染时状态正确
+    this.updateLangSelectorVisibility()
   }
 
   private setupLangSelector() {
@@ -428,6 +479,12 @@ export class HighlightCodeBlockNodeView implements NodeView {
     if (this.highlightTimer !== null) {
       window.clearTimeout(this.highlightTimer)
       this.highlightTimer = null
+    }
+
+    // 移除 selectionchange 监听，避免内存泄露
+    if (this.selectionListener) {
+      this.view.dom.ownerDocument.removeEventListener('selectionchange', this.selectionListener)
+      this.selectionListener = null
     }
   }
 }

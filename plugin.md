@@ -1036,6 +1036,49 @@ if (!files || files.length === 0) {
 - 仅在桌面版（Tauri 应用）可用，浏览器环境会返回空数组并弹出提示。
 - 返回值为字符串数组，每一项是文件的绝对路径。
 
+### context.getCurrentFilePath
+
+获取当前文档的绝对路径。如果当前内容尚未保存到磁盘，或运行环境不支持路径信息，则返回 `null`。
+
+```javascript
+const path = context.getCurrentFilePath();
+
+if (!path) {
+  context.ui.notice('当前文档尚未保存，无法按路径访问', 'err');
+} else {
+  context.ui.notice('当前文件路径：' + path, 'ok');
+}
+```
+
+**典型用法：**
+- 搭配 `context.readFileBinary` 读取当前 PDF / 图片的原始字节再上传或解析；
+- 作为 `context.createStickyNote`、`context.openFileByPath` 的参数来源。
+
+**注意：**
+- 返回的是操作系统级绝对路径（如 `C:/docs/note.md` 或 `/home/user/note.md`）；
+- 对于“新建但未保存”的文档会返回 `null`。
+
+### context.readFileBinary
+
+按绝对路径读取本地文件的二进制内容，返回 `Uint8Array`。适合用于 PDF 解析、图片处理等场景。
+
+```javascript
+const path = context.getCurrentFilePath();
+if (!path) {
+  context.ui.notice('当前文档尚未保存，无法读取文件字节', 'err');
+  return;
+}
+
+// 读取原始字节（例如用于上传到远端 API）
+const bytes = await context.readFileBinary(path);
+context.ui.notice('已读取字节数：' + bytes.length, 'ok');
+```
+
+**注意：**
+- 仅在桌面版（Tauri 应用）可用，依赖底层文件系统权限；
+- 参数必须是绝对路径，传入空字符串或非法路径会抛出错误；
+- 返回值始终为 `Uint8Array`，方便直接传给 `FormData`、`fetch` 等接口。
+
 ### context.openFileByPath
 
 按给定绝对路径打开本地文档，相当于用户在界面中打开该文件。

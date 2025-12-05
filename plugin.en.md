@@ -711,6 +711,49 @@ if (!files || files.length === 0) {
 - Only available in desktop version (Tauri app), browser environment returns empty array with alert.
 - Return value is string array, each item is absolute file path.
 
+### context.getCurrentFilePath
+
+Get the absolute path of the current document. Returns `null` if the content has not been saved to disk yet or the runtime does not expose a file path.
+
+```javascript
+const path = context.getCurrentFilePath();
+
+if (!path) {
+  context.ui.notice('Current document is not saved yet, no path available', 'err');
+} else {
+  context.ui.notice('Current file path: ' + path, 'ok');
+}
+```
+
+**Typical usage:**
+- Combine with `context.readFileBinary` to read raw bytes of the current PDF/image for upload or parsing;
+- Use as the source path when calling `context.createStickyNote` or `context.openFileByPath`.
+
+**Notes:**
+- Returns OS-level absolute paths (e.g. `C:/docs/note.md` or `/home/user/note.md`);
+- For “new, unsaved” documents this will be `null`.
+
+### context.readFileBinary
+
+Read local file as binary content by absolute path and return a `Uint8Array`. Useful for PDF parsing, image processing and other binary workflows.
+
+```javascript
+const path = context.getCurrentFilePath();
+if (!path) {
+  context.ui.notice('Current document is not saved yet, cannot read file bytes', 'err');
+  return;
+}
+
+// Read raw bytes (for example, to upload to a remote API)
+const bytes = await context.readFileBinary(path);
+context.ui.notice('Read bytes: ' + bytes.length, 'ok');
+```
+
+**Notes:**
+- Only available in desktop version (Tauri app), relies on underlying filesystem permissions;
+- Argument must be an absolute path; passing an empty or invalid path will throw an error;
+- Return value is always a `Uint8Array`, convenient for passing to `FormData`, `fetch` and similar APIs.
+
 ### context.openFileByPath
 
 Open local document by given absolute path, equivalent to user opening the file in the interface.

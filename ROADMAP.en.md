@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.6.2
+- Added: Published the official “PDF High-Precision Parser” extension powered by large models, which converts PDFs into Markdown or docx with better layout preservation and support for handwriting, formulas and tables, including one-click “To MD / To Docx” actions for the currently opened PDF.
+- Added: Extension runtime now exposes `getCurrentFilePath` and `readFileBinary` APIs so plugins can read the current document as raw bytes by absolute path, enabling scenarios such as PDF parsing and image processing.
+- Improved: Sticky Note mode windows now hide their taskbar icons on desktop platforms, making them feel more like native sticky notes and freeing up taskbar space.
+- Fixed: When “Default WYSIWYG mode” was enabled, opening a PDF by double-clicking could force WYSIWYG mode and break PDF preview; the dedicated PDF viewer is now preserved and WYSIWYG auto-switch is skipped in this case.
+- Improved: Updated README and project configuration to reflect the new extension and related workflows.
+
 ## Update v0.6.1
 - Improved: In WYSIWYG mode, unordered lists now use `-` instead of `*`, keeping list markers consistent with source-mode Markdown and making copy/paste comparisons easier.
 - Added: The xxtui todo-push extension now supports configurable write-back markers and a refactored settings panel navigation, so advanced workflows are easier to configure.

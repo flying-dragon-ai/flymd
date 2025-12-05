@@ -57,6 +57,8 @@ import { createImageUploader } from './core/imageUpload'
 import { createPluginMarket, compareInstallableItems, FALLBACK_INSTALLABLES } from './extensions/market'
 import type { InstallableItem } from './extensions/market'
 import { listDirOnce, type LibEntry } from './core/libraryFs'
+import { normSep, isInside, ensureDir, moveFileSafe, renameFileSafe } from './core/fsSafe'
+import { getLibrarySort, setLibrarySort, type LibSortMode } from './core/librarySort'
 import {
   type StickyNoteColor,
   type StickyNoteReminderMap,
@@ -109,7 +111,6 @@ import { getUiZoom, setUiZoom, applyUiZoom, zoomIn, zoomOut, zoomReset, getPrevi
 import { initAutoHideScrollbar, rescanScrollContainers } from './core/scrollbar'
 
 type Mode = 'edit' | 'preview'
-type LibSortMode = 'name_asc' | 'name_desc' | 'mtime_asc' | 'mtime_desc'
 // 最近文件最多条数
 const RECENT_MAX = 5
 
@@ -5289,25 +5290,6 @@ async function setLibraryRoot(p: string) {
   try { await upsertLibrary({ root: p }) } catch {}
 }
 
-// 库排序偏好（持久化）
-async function getLibrarySort(): Promise<LibSortMode> {
-  try {
-    if (!store) return 'name_asc'
-    const val = await store.get('librarySort')
-    const s = (typeof val === 'string' ? val : '')
-    const allowed: LibSortMode[] = ['name_asc', 'name_desc', 'mtime_asc', 'mtime_desc']
-    return (allowed.includes(s as any) ? (s as LibSortMode) : 'name_asc')
-  } catch { return 'name_asc' }
-}
-
-async function setLibrarySort(mode: LibSortMode) {
-  try {
-    if (!store) return
-    await store.set('librarySort', mode)
-    await store.save()
-  } catch {}
-}
-
 // —— 大纲滚动同步 ——
 let _outlineScrollBound = false
 let _outlineActiveId = ''
@@ -7827,35 +7809,6 @@ async function pickLibraryRoot(): Promise<string | null> {
     showError('选择库目录失败', e)
     return null
   }
-}
-
-
-// 路径工具与安全检查
-function normSep(p: string): string { return p.replace(/[\\/]+/g, p.includes('\\') ? '\\' : '/') }
-function isInside(root: string, p: string): boolean {
-  try {
-    const r = normSep(root).toLowerCase()
-    const q = normSep(p).toLowerCase()
-    return q.startsWith(r.endsWith('/') || r.endsWith('\\') ? r : r + (r.includes('\\') ? '\\' : '/'))
-  } catch { return false }
-}
-async function ensureDir(dir: string) { try { await mkdir(dir, { recursive: true } as any) } catch {} }
-
-// 文件操作封装
-async function moveFileSafe(src: string, dst: string): Promise<void> {
-  try { await rename(src, dst) }
-  catch {
-    const data = await readFile(src)
-    await ensureDir(dst.replace(/[\\/][^\\/]*$/, ''))
-    await writeFile(dst, data as any)
-    try { await remove(src) } catch {}
-  }
-}
-async function renameFileSafe(p: string, newName: string): Promise<string> {
-  const base = p.replace(/[\\/][^\\/]*$/, '')
-  const dst = base + (base.includes('\\') ? '\\' : '/') + newName
-  await moveFileSafe(p, dst)
-  return dst
 }
 
 // 通用重命名帮助函数：弹出对话框并在文件树/当前文档中同步路径

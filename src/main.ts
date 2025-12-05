@@ -8422,6 +8422,13 @@ async function enterStickyNoteMode(filePath: string) {
     // 设置窗口大小和位置
     await win.setSize(new LogicalSize(stickyWidth, stickyHeight))
     await win.setPosition(new LogicalPosition(posX, posY))
+
+    // 便签模式：隐藏任务栏图标
+    try {
+      await win.setSkipTaskbar(true)
+    } catch (e) {
+      console.error('[便签模式] 隐藏任务栏图标失败:', e)
+    }
   } catch (e) {
     console.error('[便签模式] 调整窗口大小和位置失败:', e)
   }

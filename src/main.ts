@@ -90,6 +90,7 @@ import { initExtensionsPanel, refreshExtensionsUI as panelRefreshExtensionsUI, s
 import { initAboutOverlay, showAbout } from './ui/aboutOverlay'
 import { showUpdateOverlayLinux, showUpdateDownloadedOverlay, showInstallFailedOverlay, loadUpdateExtra, renderUpdateDetailsHTML } from './ui/updateOverlay'
 import { openInBrowser, upMsg } from './core/updateUtils'
+import { initLibraryContextMenu } from './ui/libraryContextMenu'
 import {
   removeContextMenu,
   showContextMenu,
@@ -692,9 +693,6 @@ function updatePluginDockGaps(): void {
     notifyWorkspaceLayoutChanged()
   } catch {}
 }
-
-// 右键菜单键盘处理器仅用于文件树右键菜单
-let _libCtxKeyHandler: ((e: KeyboardEvent) => void) | null = null // 文件树右键菜单的键盘事件处理器
 
 async function readUploaderEnabledState(): Promise<boolean> {
   try {
@@ -8135,7 +8133,70 @@ function bindEvents() {
   if (btnUpdate) btnUpdate.addEventListener('click', guard(() => checkUpdateInteractive()))
   // 代码复制按钮（事件委托）
   // 库侧栏右键菜单
-  document.addEventListener('contextmenu', (ev) => {
+  initLibraryContextMenu({
+    getCurrentFilePath: () => currentFilePath,
+    isDirty: () => !!dirty,
+    normalizePath,
+    getLibraryRoot,
+    newFileSafe,
+    newFolderSafe: async (dir: string) => { await newFolderSafe(dir); },
+    renameFileSafe,
+    deleteFileSafe,
+    openFile: async (p: string) => { await openFile2(p) },
+    ensureTreeInitialized: async () => {
+      const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null
+      if (treeEl && !fileTreeReady) {
+        await fileTree.init(treeEl, {
+          getRoot: getLibraryRoot,
+          onOpenFile: async (p: string) => { await openFile2(p) },
+          onOpenNewFile: async (p: string) => { await openFile2(p) },
+          onMoved: async (src: string, dst: string) => {
+            try { if (currentFilePath === src) { currentFilePath = dst as any; refreshTitle() } } catch {}
+          },
+        })
+        fileTreeReady = true
+      }
+    },
+    refreshTree: async () => {
+      const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null
+      if (treeEl && !fileTreeReady) {
+        await fileTree.init(treeEl, {
+          getRoot: getLibraryRoot,
+          onOpenFile: async (p: string) => { await openFile2(p) },
+          onOpenNewFile: async (p: string) => { await openFile2(p) },
+          onMoved: async (src: string, dst: string) => {
+            try { if (currentFilePath === src) { currentFilePath = dst as any; refreshTitle() } } catch {}
+          },
+        })
+        fileTreeReady = true
+      } else if (treeEl) {
+        await fileTree.refresh()
+      }
+    },
+    updateTitle: () => { refreshTitle() },
+    confirmNative: async (msg: string) => { return await confirmNative(msg) },
+    exists: async (p: string) => { return await exists(p as any) },
+    askOverwrite: async (msg: string) => { return await ask(msg) },
+    moveFileSafe,
+    setSort: async (mode: LibSortMode) => { await setLibrarySort(mode) },
+    applySortToTree: async (mode: LibSortMode) => {
+      try { fileTree.setSort(mode) } catch {}
+      try { await fileTree.refresh() } catch {}
+    },
+    clearFolderOrderForParent: async (p: string) => {
+      try { (await import('./fileTree')).clearFolderOrderForParent(p) } catch {}
+    },
+    onAfterDeleteCurrent: () => {
+      if (currentFilePath) {
+        currentFilePath = null as any
+        try { (editor as HTMLTextAreaElement).value = '' } catch {}
+        try { preview.innerHTML = '' } catch {}
+        refreshTitle()
+      }
+    },
+  })
+  // 旧实现保留为空注释，避免重复绑定
+  /*document.addEventListener('contextmenu', (ev) => {
     const target = ev.target as HTMLElement
     const row = target?.closest?.('.lib-node') as HTMLElement | null
     if (!row) return
@@ -8354,7 +8415,7 @@ function bindEvents() {
       }
     }
     document.addEventListener('keydown', _libCtxKeyHandler)
-  })
+  })*/
   // 所见模式：右键打印（已去除，根据用户反馈移除该菜单）
   document.addEventListener('click', async (ev) => {
     const t = ev?.target as HTMLElement

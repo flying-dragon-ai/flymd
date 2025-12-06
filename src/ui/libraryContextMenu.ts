@@ -3,14 +3,14 @@
 
 import { t } from '../i18n'
 import type { LibSortMode } from '../core/librarySort'
+import { openRenameDialog } from './linkDialogs'
+import { newFileSafe, newFolderSafe } from '../fileTree'
 
 export type LibraryContextMenuDeps = {
   getCurrentFilePath(): string | null
   isDirty(): boolean
   normalizePath(p: string): string
   getLibraryRoot(): Promise<string | null>
-  newFileSafe(dir: string): Promise<string>
-  newFolderSafe(dir: string): Promise<void>
   renameFileSafe(path: string, newName: string): Promise<string>
   deleteFileSafe(path: string, toTrash: boolean): Promise<void>
   openFile(path: string): Promise<void>
@@ -136,31 +136,38 @@ export function initLibraryContextMenu(deps: LibraryContextMenuDeps): void {
     if (isDir) {
       menu.appendChild(mkItem(t('ctx.newFile'), async () => {
         try {
-          let p2 = await deps.newFileSafe(path)
-          const oldName = p2.split(/[\\/]+/).pop() || ''
-          const m = oldName.match(/^(.*?)(\.[^.]+)$/)
-          const stem = m ? m[1] : oldName
-          const ext = m ? m[2] : '.md'
-          const win = window as any
-          const renameDialog = win?.flymdOpenRenameDialog as ((stem: string, ext: string) => Promise<string | null>) | undefined
-          let newStem = stem
-          if (typeof renameDialog === 'function') {
-            const v = await renameDialog(stem, ext)
-            if (v && v !== stem) newStem = v
-          }
-          if (newStem && newStem !== stem) {
-            const newName = newStem + ext
-            p2 = await deps.renameFileSafe(p2, newName)
-          }
-          await deps.openFile(p2)
+          // 1. 先弹出命名对话框
+          const defaultStem = '新建文档'
+          const defaultExt = '.md'
+          const newStem = await openRenameDialog(defaultStem, defaultExt)
+
+          // 2. 用户取消则直接返回
+          if (!newStem) return
+
+          // 3. 创建文件（使用直接导入的函数）
+          const fileName = newStem + defaultExt
+          const fullPath = await newFileSafe(path, fileName)
+
+          // 4. 打开文件
+          await deps.openFile(fullPath)
         } catch (e) {
-          console.error('新建失败', e)
+          console.error('新建文件失败', e)
         }
       }))
 
       menu.appendChild(mkItem(t('ctx.newFolder'), async () => {
         try {
-          await deps.newFolderSafe(path)
+          // 1. 先弹出命名对话框
+          const defaultName = '新建文件夹'
+          const newName = await openRenameDialog(defaultName, '')
+
+          // 2. 用户取消则直接返回
+          if (!newName) return
+
+          // 3. 创建文件夹（使用直接导入的函数）
+          await newFolderSafe(path, newName)
+
+          // 4. 刷新树显示
           await deps.ensureTreeInitialized()
           await deps.refreshTree()
         } catch (e) {

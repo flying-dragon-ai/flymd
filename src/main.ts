@@ -7379,8 +7379,6 @@ function bindEvents() {
     isDirty: () => !!dirty,
     normalizePath,
     getLibraryRoot,
-    newFileSafe,
-    newFolderSafe: async (dir: string) => { await newFolderSafe(dir); },
     renameFileSafe,
     deleteFileSafe,
     openFile: async (p: string) => { await openFile2(p) },

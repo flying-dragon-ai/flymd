@@ -152,7 +152,7 @@ async function moveFileSafe(src: string, dst: string): Promise<void> {
   }
 }
 
-async function newFileSafe(dir: string, hint = '新建文档.md'): Promise<string> {
+export async function newFileSafe(dir: string, hint = '新建文档.md'): Promise<string> {
   const s = sep(dir)
   let n = hint, i = 1
   while (await exists(dir + s + n)) {
@@ -165,7 +165,7 @@ async function newFileSafe(dir: string, hint = '新建文档.md'): Promise<strin
   return full
 }
 
-async function newFolderSafe(dir: string, hint = '新建文件夹'): Promise<string> {
+export async function newFolderSafe(dir: string, hint = '新建文件夹'): Promise<string> {
   const s = sep(dir)
   let n = hint, i = 1
   while (await exists(dir + s + n)) { n = `${hint} ${++i}` }

@@ -79,6 +79,12 @@ import {
   restoreWindowStateBeforeStickyCore,
 } from './modes/stickyNote'
 import {
+  createStickyNotePrefsHost,
+  type StickyNotePrefsHost,
+  createStickyNoteWindowHost,
+  type StickyNoteWindowHost,
+} from './modes/stickyNoteHost'
+import {
   ensurePluginsDir,
   parseRepoInput,
   compareVersions,
@@ -5702,6 +5708,27 @@ function updateFocusSidebarBg() {
   }
 }
 
+// 便签配置宿主：封装配置读写与外观控制
+const stickyNotePrefsHost: StickyNotePrefsHost = createStickyNotePrefsHost({
+  appLocalDataDir,
+  readTextFileAnySafe,
+  writeTextFileAnySafe,
+  getStore: () => store,
+  getOpacity: () => stickyNoteOpacity,
+  setOpacity: (v) => { stickyNoteOpacity = v },
+  getColor: () => stickyNoteColor,
+  setColor: (c) => { stickyNoteColor = c },
+  getReminders: () => stickyNoteReminders,
+  setReminders: (m) => { stickyNoteReminders = m },
+})
+
+const loadStickyNotePrefs = stickyNotePrefsHost.loadStickyNotePrefs
+const saveStickyNotePrefs = stickyNotePrefsHost.saveStickyNotePrefs
+const setStickyNoteOpacity = stickyNotePrefsHost.setStickyNoteOpacity
+const setStickyNoteColor = stickyNotePrefsHost.setStickyNoteColor
+const toggleStickyOpacitySlider = stickyNotePrefsHost.toggleStickyOpacitySlider
+const toggleStickyColorPicker = stickyNotePrefsHost.toggleStickyColorPicker
+
 // 监听模式切换事件，更新专注模式侧栏背景和外圈UI颜色
 window.addEventListener('flymd:mode:changed', (ev: Event) => {
   try { updateFocusSidebarBg() } catch {}
@@ -5880,247 +5907,6 @@ async function toggleStickyEditMode(btn: HTMLButtonElement) {
   try { notifyModeChange() } catch {}
 }
 
-// 切换窗口拖动锁定
-function toggleStickyWindowLock(btn: HTMLButtonElement) {
-  stickyNoteLocked = !stickyNoteLocked
-  btn.innerHTML = getStickyLockIcon(stickyNoteLocked)
-  btn.classList.toggle('active', stickyNoteLocked)
-  btn.title = stickyNoteLocked ? '解除锁定' : '锁定窗口位置'
-
-  // 禁用所有拖动区域（同时处理属性和 CSS）
-  const dragRegions = document.querySelectorAll('.custom-titlebar-drag, .titlebar, [data-tauri-drag-region]')
-  dragRegions.forEach((el) => {
-    const htmlEl = el as HTMLElement
-    if (stickyNoteLocked) {
-      // 锁定：禁用拖动
-      el.removeAttribute('data-tauri-drag-region')
-      htmlEl.style.setProperty('-webkit-app-region', 'no-drag', 'important')
-      htmlEl.style.setProperty('app-region', 'no-drag', 'important')
-      htmlEl.style.cursor = 'default'
-      htmlEl.classList.add('sticky-drag-locked')
-    } else {
-      // 解锁：恢复拖动
-      if (el.classList.contains('custom-titlebar-drag')) {
-        el.setAttribute('data-tauri-drag-region', '')
-      }
-      htmlEl.style.removeProperty('-webkit-app-region')
-      htmlEl.style.removeProperty('app-region')
-      htmlEl.style.cursor = 'move'
-      htmlEl.classList.remove('sticky-drag-locked')
-    }
-  })
-}
-
-// 切换窗口置顶
-async function toggleStickyWindowOnTop(btn: HTMLButtonElement) {
-  stickyNoteOnTop = !stickyNoteOnTop
-  btn.innerHTML = getStickyTopIcon(stickyNoteOnTop)
-  btn.classList.toggle('active', stickyNoteOnTop)
-  btn.title = stickyNoteOnTop ? '取消置顶' : '窗口置顶'
-
-  try {
-    const win = getCurrentWindow()
-    await win.setAlwaysOnTop(stickyNoteOnTop)
-  } catch (e) {
-    console.error('[便签模式] 设置置顶失败:', e)
-  }
-}
-
-const stickyNotePrefsDeps: StickyNotePrefsDeps = {
-  appLocalDataDir,
-  readTextFileAnySafe,
-  writeTextFileAnySafe,
-  getStore: () => store,
-}
-
-// 读取便签模式配置（颜色和透明度），带 Store 兼容回退
-async function loadStickyNotePrefs(): Promise<StickyNotePrefs> {
-  const { prefs, reminders } = await loadStickyNotePrefsCore(stickyNotePrefsDeps)
-  stickyNoteReminders = reminders
-  return { ...prefs, reminders }
-}
-
-// 保存便签模式配置到本地文件，并可选写回 Store（兼容旧版本）
-async function saveStickyNotePrefs(prefs: StickyNotePrefs, skipStore = false): Promise<void> {
-  const reminders = prefs.reminders ?? stickyNoteReminders
-  if (reminders && typeof reminders === 'object') {
-    stickyNoteReminders = reminders
-  }
-  await saveStickyNotePrefsCore(stickyNotePrefsDeps, prefs, stickyNoteReminders, skipStore)
-}
-
-// 切换透明度滑块显示
-function toggleStickyOpacitySlider(btn: HTMLButtonElement) {
-  const existing = document.getElementById('sticky-opacity-slider-container')
-  if (existing) {
-    existing.remove()
-    btn.classList.remove('active')
-    return
-  }
-
-  const container = document.createElement('div')
-  container.id = 'sticky-opacity-slider-container'
-  container.className = 'sticky-opacity-slider-container'
-
-  const label = document.createElement('div')
-  label.className = 'sticky-opacity-label'
-  const initialPercent = Math.round((1 - stickyNoteOpacity) * 100)
-  label.textContent = `透明度: ${initialPercent}%`
-
-  const slider = document.createElement('input')
-  slider.type = 'range'
-  slider.className = 'sticky-opacity-slider'
-  slider.min = '0'
-  slider.max = '100'
-  slider.value = String(initialPercent)
-
-  slider.addEventListener('input', async (e) => {
-    const value = parseInt((e.target as HTMLInputElement).value)
-    label.textContent = `透明度: ${value}%`
-    await setStickyNoteOpacity(1 - value / 100)
-  })
-
-  container.appendChild(label)
-  container.appendChild(slider)
-
-  // 阻止面板内部点击事件冒泡到document
-  container.addEventListener('click', (e) => {
-    e.stopPropagation()
-  })
-
-  // 点击外部区域时关闭面板
-  const closePanel = (e: MouseEvent) => {
-    if (!container.contains(e.target as Node) && e.target !== btn) {
-      container.remove()
-      btn.classList.remove('active')
-      document.removeEventListener('click', closePanel)
-    }
-  }
-
-  // 延迟添加监听器,避免立即触发
-  setTimeout(() => {
-    document.addEventListener('click', closePanel)
-  }, 0)
-
-  document.body.appendChild(container)
-  btn.classList.add('active')
-}
-
-// 设置透明度（通过 CSS 变量实现真正透明）
-async function setStickyNoteOpacity(opacity: number) {
-  stickyNoteOpacity = Math.max(0, Math.min(1, opacity))
-
-  // 将颜色/透明度统一应用到 DOM
-  applyStickyNoteAppearance(stickyNoteColor, stickyNoteOpacity)
-
-  // 持久化到本地配置文件（并兼容旧版 Store）
-  await saveStickyNotePrefs({ opacity: stickyNoteOpacity, color: stickyNoteColor })
-}
-
-// 设置便签背景色（含持久化）
-async function setStickyNoteColor(color: StickyNoteColor) {
-  stickyNoteColor = color
-  applyStickyNoteAppearance(stickyNoteColor, stickyNoteOpacity)
-  await saveStickyNotePrefs({ opacity: stickyNoteOpacity, color: stickyNoteColor })
-}
-
-// 切换颜色选择面板
-function toggleStickyColorPicker(btn: HTMLButtonElement) {
-  const existing = document.getElementById('sticky-color-picker-container')
-  if (existing) {
-    existing.remove()
-    btn.classList.remove('active')
-    return
-  }
-
-  const container = document.createElement('div')
-  container.id = 'sticky-color-picker-container'
-  container.className = 'sticky-color-picker-container'
-
-  const colors: Array<{ key: StickyNoteColor; title: string }> = [
-    { key: 'white', title: '白色背景' },
-    { key: 'gray', title: '灰色背景' },
-    { key: 'black', title: '黑色背景' },
-    { key: 'yellow', title: '便签黄' },
-    { key: 'pink', title: '粉色' },
-    { key: 'blue', title: '蓝色' },
-    { key: 'green', title: '绿色' },
-    { key: 'orange', title: '橙色' },
-    { key: 'purple', title: '紫色' },
-    { key: 'red', title: '红色' }
-  ]
-
-  colors.forEach(({ key, title }) => {
-    const swatch = document.createElement('button')
-    swatch.type = 'button'
-    swatch.className = `sticky-color-swatch sticky-color-${key}` + (key === stickyNoteColor ? ' active' : '')
-    swatch.title = title
-    swatch.addEventListener('click', (e) => {
-      e.stopPropagation()
-      const all = container.querySelectorAll('.sticky-color-swatch')
-      all.forEach((el) => el.classList.remove('active'))
-      swatch.classList.add('active')
-      void setStickyNoteColor(key)
-    })
-    container.appendChild(swatch)
-  })
-
-  // 阻止面板内部点击事件冒泡到document
-  container.addEventListener('click', (e) => {
-    e.stopPropagation()
-  })
-
-  // 点击外部区域时关闭面板
-  const closePanel = (e: MouseEvent) => {
-    if (!container.contains(e.target as Node) && e.target !== btn) {
-      container.remove()
-      btn.classList.remove('active')
-      document.removeEventListener('click', closePanel)
-    }
-  }
-
-  // 延迟添加监听器,避免立即触发
-  setTimeout(() => {
-    document.addEventListener('click', closePanel)
-  }, 0)
-
-  document.body.appendChild(container)
-
-  // 动态计算面板位置，确保不超出窗口边界
-  const btnRect = btn.getBoundingClientRect()
-  const containerRect = container.getBoundingClientRect()
-  const windowWidth = window.innerWidth
-  const windowHeight = window.innerHeight
-
-  // 默认在按钮下方居中显示
-  let top = btnRect.bottom + 8
-  let left = btnRect.left + btnRect.width / 2 - containerRect.width / 2
-
-  // 边界检测：如果面板超出右边界，调整到左对齐
-  if (left + containerRect.width > windowWidth - 10) {
-    left = windowWidth - containerRect.width - 10
-  }
-
-  // 边界检测：如果面板超出左边界，调整到右对齐
-  if (left < 10) {
-    left = 10
-  }
-
-  // 边界检测：如果面板超出底部，显示在按钮上方
-  if (top + containerRect.height > windowHeight - 10) {
-    top = btnRect.top - containerRect.height - 8
-  }
-
-  // 边界检测：如果面板超出顶部，强制显示在按钮下方
-  if (top < 10) {
-    top = btnRect.bottom + 8
-  }
-
-  container.style.top = `${top}px`
-  container.style.left = `${left}px`
-  container.style.right = 'auto'
-  btn.classList.add('active')
-}
 
 // 便签模式：为待办项添加推送和提醒按钮
 function addStickyTodoButtons() {
@@ -6302,112 +6088,36 @@ async function handleStickyTodoReminder(todoText: string, index: number, btn?: H
   }
 }
 
-// 便签模式：自动调整窗口高度以适应内容（只调高度，不修改宽度）
-const STICKY_MIN_HEIGHT = 150
-const STICKY_MAX_HEIGHT = 600
-let _stickyAutoHeightTimer: number | null = null
+// 便签窗口行为宿主：封装锁定/置顶/高度调整与控制条创建
+const stickyNoteWindowHost: StickyNoteWindowHost = createStickyNoteWindowHost({
+  getStickyNoteMode: () => stickyNoteMode,
+  getStickyNoteLocked: () => stickyNoteLocked,
+  setStickyNoteLocked: (v) => { stickyNoteLocked = v },
+  getStickyNoteOnTop: () => stickyNoteOnTop,
+  setStickyNoteOnTop: (v) => { stickyNoteOnTop = v },
 
-async function adjustStickyWindowHeight() {
-  if (!stickyNoteMode) return
-  try {
-    // 获取预览内容的实际高度
-    const previewBody = preview.querySelector('.preview-body') as HTMLElement | null
-    if (!previewBody) return
+  getPreviewElement: () => preview,
+  getCurrentWindow,
+  importDpi: () => import('@tauri-apps/api/dpi'),
 
-    // 计算内容高度 + 顶部控制栏高度 + 边距
-    const contentHeight = previewBody.scrollHeight
-    const controlsHeight = 50 // 顶部控制按钮区域
-    const padding = 30 // 上下边距
+  toggleStickyEditMode,
+  addStickyTodoLine,
+  toggleStickyOpacitySlider,
+  toggleStickyColorPicker,
 
-    let targetHeight = contentHeight + controlsHeight + padding
-    // 限制在最小/最大范围内
-    targetHeight = Math.max(STICKY_MIN_HEIGHT, Math.min(STICKY_MAX_HEIGHT, targetHeight))
+  getStickyLockIcon,
+  getStickyTopIcon,
+  getStickyOpacityIcon,
+  getStickyColorIcon,
+  getStickyEditIcon,
+})
 
-    const win = getCurrentWindow()
-    const currentSize = await win.innerSize()
-
-    // 仅当高度变化超过 10px 时才调整，避免频繁抖动
-    if (Math.abs(currentSize.height - targetHeight) > 10) {
-      const { LogicalSize } = await import('@tauri-apps/api/dpi')
-      // 只调整高度，保持当前宽度不变，避免把窗口往右撑出去
-      await win.setSize(new LogicalSize(currentSize.width, targetHeight))
-    }
-  } catch (e) {
-    console.error('[便签模式] 调整窗口高度失败:', e)
-  }
-}
-
-// 节流版本的高度调整
-function scheduleAdjustStickyHeight() {
-  if (!stickyNoteMode) return
-  if (_stickyAutoHeightTimer) {
-    clearTimeout(_stickyAutoHeightTimer)
-  }
-  _stickyAutoHeightTimer = window.setTimeout(() => {
-    _stickyAutoHeightTimer = null
-    void adjustStickyWindowHeight()
-  }, 100)
-}
-
-// 创建便签控制按钮（编辑 + 锁定 + 置顶）
-function createStickyNoteControls() {
-  const existing = document.getElementById('sticky-note-controls')
-  if (existing) existing.remove()
-
-  const container = document.createElement('div')
-  container.id = 'sticky-note-controls'
-  container.className = 'sticky-note-controls'
-
-  // 编辑按钮（笔图标，切换编辑/阅读模式）
-  const editBtn = document.createElement('button')
-  editBtn.className = 'sticky-note-btn sticky-note-edit-btn'
-  editBtn.title = '切换到源码模式'
-  editBtn.innerHTML = getStickyEditIcon(false)
-  editBtn.addEventListener('click', async () => await toggleStickyEditMode(editBtn))
-
-  // 图钉按钮（锁定位置）
-  const lockBtn = document.createElement('button')
-  lockBtn.className = 'sticky-note-btn sticky-note-lock-btn'
-  lockBtn.title = '锁定窗口位置'
-  lockBtn.innerHTML = getStickyLockIcon(false)
-  lockBtn.addEventListener('click', () => toggleStickyWindowLock(lockBtn))
-
-  // 置顶按钮
-  const topBtn = document.createElement('button')
-  topBtn.className = 'sticky-note-btn sticky-note-top-btn'
-  topBtn.title = '窗口置顶'
-  topBtn.innerHTML = getStickyTopIcon(false)
-  topBtn.addEventListener('click', async () => await toggleStickyWindowOnTop(topBtn))
-
-  // 透明度按钮
-  const opacityBtn = document.createElement('button')
-  opacityBtn.className = 'sticky-note-btn sticky-note-opacity-btn'
-  opacityBtn.title = '调整透明度'
-  opacityBtn.innerHTML = getStickyOpacityIcon()
-  opacityBtn.addEventListener('click', () => toggleStickyOpacitySlider(opacityBtn))
-
-   // 颜色按钮
-  const colorBtn = document.createElement('button')
-  colorBtn.className = 'sticky-note-btn sticky-note-color-btn'
-  colorBtn.title = '切换背景颜色'
-  colorBtn.innerHTML = getStickyColorIcon()
-  colorBtn.addEventListener('click', () => toggleStickyColorPicker(colorBtn))
-
-  // 待办按钮：在文末插入一行 "- [ ] "
-  const todoBtn = document.createElement('button')
-  todoBtn.className = 'sticky-note-btn'
-  todoBtn.title = '添加待办'
-  todoBtn.textContent = '+'
-  todoBtn.addEventListener('click', async () => { await addStickyTodoLine(editBtn) })
-
-  container.appendChild(editBtn)
-  container.appendChild(lockBtn)
-  container.appendChild(topBtn)
-  container.appendChild(opacityBtn)
-  container.appendChild(colorBtn)
-  container.appendChild(todoBtn)
-  document.body.appendChild(container)
-}
+// 保持原有入口函数名不变，降低拆分风险
+const toggleStickyWindowLock = stickyNoteWindowHost.toggleStickyWindowLock
+const toggleStickyWindowOnTop = stickyNoteWindowHost.toggleStickyWindowOnTop
+const adjustStickyWindowHeight = stickyNoteWindowHost.adjustStickyWindowHeight
+const scheduleAdjustStickyHeight = stickyNoteWindowHost.scheduleAdjustStickyHeight
+const createStickyNoteControls = stickyNoteWindowHost.createStickyNoteControls
 
 // 便签模式运行时依赖：由 stickyNote.ts 统一驱动模式切换与窗口行为
 const stickyNoteModeDeps: StickyNoteModeDeps = {

@@ -11,7 +11,6 @@ const SES_KEY = 'ai.session.default'
 
 const FREE_MODEL_OPTIONS = {
   qwen: { label: 'Qwen', id: 'Qwen/Qwen3-8B' },
-  qwen_omni: { label: 'Omin Vision', id: 'Qwen/Qwen3-Omni-30B-A3B-Instruct', vision: true },
   gemini: { label: 'Gemini Vision', id: 'gemini-2.5-flash', vision: true },
   glm: { label: 'GLM', id: 'THUDM/glm-4-9b-chat' }
 }
@@ -28,8 +27,7 @@ const DEFAULT_CFG = {
   limits: { maxCtxChars: 6000 },
   theme: 'auto',
   freeModel: DEFAULT_FREE_MODEL_KEY,
-  alwaysUseFreeTrans: false, // 翻译功能始终使用免费模型
-  qwenOmniHintShown: false // 是否已提示过 Omin 视觉模型限制
+  alwaysUseFreeTrans: false // 翻译功能始终使用免费模型
 }
 
 // 会话只做最小持久化（可选），首版以内存为主
@@ -1672,33 +1670,6 @@ async function refreshHeader(context){
       }
     }
   } catch {}
-  // Omin 视觉模型：若当前已选择且最近一次助手消息不是提示文案，则在会话中发送一次提示
-  try {
-    if (isFreeProvider(cfg) && normalizeFreeModelKey(cfg.freeModel) === 'qwen_omni') {
-      await ensureSessionForDoc(context)
-      const tip = '当前使用的是 Omin 视觉模型：免费体验但每日有用量和速率限制，请按需使用。'
-      let lastAssistant = null
-      try {
-        const msgs = Array.isArray(__AI_SESSION__?.messages) ? __AI_SESSION__.messages : []
-        for (let i = msgs.length - 1; i >= 0; i--) {
-          if (msgs[i] && msgs[i].role === 'assistant') {
-            lastAssistant = msgs[i]
-            break
-          }
-        }
-      } catch {}
-      const lastText = lastAssistant && typeof lastAssistant.content === 'string'
-        ? lastAssistant.content
-        : ''
-      if (!lastText || !lastText.includes('当前使用的是 Omin 视觉模型')) {
-        pushMsg('assistant', tip)
-        __AI_LAST_REPLY__ = tip
-        const chat = el('ai-chat')
-        if (chat) renderMsgs(chat)
-        try { await syncCurrentSessionToDB(context) } catch {}
-      }
-    }
-  } catch {}
   // 更新工具栏模式切换开关
   try {
     const isFree = isFreeProvider(cfg)
@@ -2178,7 +2149,7 @@ async function mountWindow(context){
     '    <span class="mode-label" id="mode-label-free-toolbar">免费</span>',
     '   </div>',
     '   <label id="ai-free-model-label" style="display:none;font-size:12px;color:#6b7280;white-space:nowrap;margin-left:6px;">模型</label>',
-    '   <select id="ai-free-model" title="选择免费模型" style="display:none;width:80px;border-radius:6px;padding:4px 6px;font-size:12px;"><option value="qwen">Qwen</option><option value="qwen_omni">Omin Vision</option><option value="gemini">Gemini Vision</option><option value="glm">GLM</option></select>',
+    '   <select id="ai-free-model" title="选择免费模型" style="display:none;width:80px;border-radius:6px;padding:4px 6px;font-size:12px;"><option value="qwen">Qwen</option><option value="gemini">Gemini Vision</option><option value="glm">GLM</option></select>',
     '   <div id="ai-selects">',
     '    <label id="ai-model-label" style="font-size:12px;">模型</label>',
     '    <input id="ai-model" placeholder="如 gpt-4o-mini" style="width:120px;font-size:12px;padding:4px 6px;"/>',

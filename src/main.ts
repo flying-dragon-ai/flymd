@@ -101,6 +101,11 @@ import {
   type InstalledPlugin,
   type PluginUpdateState,
 } from './extensions/runtime'
+import {
+  CORE_AI_EXTENSION_ID,
+  ensureCoreExtensionsAfterStartup,
+  markCoreExtensionBlocked,
+} from './extensions/coreExtensions'
 import { initPluginsMenu, addToPluginsMenu, removeFromPluginsMenu, togglePluginDropdown } from './extensions/pluginMenu'
 import { openLinkDialog, openRenameDialog } from './ui/linkDialogs'
 import { initExtensionsPanel, refreshExtensionsUI as panelRefreshExtensionsUI, showExtensionsOverlay as panelShowExtensionsOverlay } from './extensions/extensionsPanel'
@@ -8982,7 +8987,7 @@ function bindEvents() {
         deactivatePlugin,
         getActivePluginModule: (id: string) => activePlugins.get(id),
         coreAiExtensionId: CORE_AI_EXTENSION_ID,
-        markCoreExtensionBlocked,
+        markCoreExtensionBlocked: (id: string) => markCoreExtensionBlocked(store, id),
         removePluginDir: (dir: string) => removeDirRecursive(dir),
         openPluginSettings,
       })
@@ -9035,7 +9040,7 @@ function bindEvents() {
           // 初始化统一的"插件"菜单按钮
           initPluginsMenu()
           await loadAndActivateEnabledPlugins()
-          await ensureCoreExtensionsAfterStartup()
+          await ensureCoreExtensionsAfterStartup(store, APP_VERSION, activatePlugin)
           // 启动后后台检查一次扩展更新（仅提示，不自动更新）
           await checkPluginUpdatesOnStartup()
         } catch (e) {
@@ -9267,79 +9272,6 @@ function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Prom
 // ========= END =========
 
 // ========== 扩展/插件：运行时与 UI ==========
-type CoreExtensionState = 'pending' | 'installed' | 'blocked'
-const CORE_EXT_STATE_KEY = 'coreExtensions:autoInstall'
-const CORE_AI_EXTENSION_ID = 'ai-assistant'
-const CORE_AI_MANIFEST_URL = 'https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/ai-assistant/manifest.json'
-
-async function getCoreExtensionStateMap(): Promise<Record<string, CoreExtensionState>> {
-  try {
-    if (!store) return {}
-    const raw = await store.get(CORE_EXT_STATE_KEY)
-    if (raw && typeof raw === 'object') {
-      const next: Record<string, CoreExtensionState> = {}
-      for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
-        if (val === 'blocked' || val === 'installed' || val === 'pending') {
-          next[key] = val
-        }
-      }
-      return next
-    }
-  } catch {}
-  return {}
-}
-
-async function setCoreExtensionStateMap(map: Record<string, CoreExtensionState>): Promise<void> {
-  try {
-    if (!store) return
-    await store.set(CORE_EXT_STATE_KEY, map)
-    await store.save()
-  } catch {}
-}
-
-async function getCoreExtensionState(id: string): Promise<CoreExtensionState> {
-  const map = await getCoreExtensionStateMap()
-  return map[id] ?? 'pending'
-}
-
-async function setCoreExtensionState(id: string, state: CoreExtensionState): Promise<void> {
-  try {
-    if (!store) return
-    const map = await getCoreExtensionStateMap()
-    if (map[id] === state) return
-    map[id] = state
-    await setCoreExtensionStateMap(map)
-  } catch {}
-}
-
-async function markCoreExtensionBlocked(id: string): Promise<void> {
-  await setCoreExtensionState(id, 'blocked')
-}
-
-async function ensureCoreExtensionsAfterStartup(): Promise<void> {
-  await ensureAiAssistantAutoInstall()
-}
-
-async function ensureAiAssistantAutoInstall(): Promise<void> {
-  try {
-    if (!store) return
-    const state = await getCoreExtensionState(CORE_AI_EXTENSION_ID)
-    if (state === 'blocked') return
-    const installed = await getInstalledPlugins()
-    if (installed[CORE_AI_EXTENSION_ID]) {
-      if (state !== 'installed') await setCoreExtensionState(CORE_AI_EXTENSION_ID, 'installed')
-      return
-    }
-    await setCoreExtensionState(CORE_AI_EXTENSION_ID, 'pending')
-    const rec = await installPluginFromGit(CORE_AI_MANIFEST_URL)
-    await activatePlugin(rec)
-    await setCoreExtensionState(CORE_AI_EXTENSION_ID, 'installed')
-    try { logInfo('AI 助手扩展已自动安装') } catch {}
-  } catch (error) {
-    console.warn('[CoreExt] 自动安装 AI 助手失败', error)
-  }
-}
-
 function pluginNotice(msg: string, level: 'ok' | 'err' = 'ok', ms?: number) {
   try {
     // 使用新的通知系统

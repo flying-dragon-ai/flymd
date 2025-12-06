@@ -110,11 +110,9 @@ import {
   type PluginUpdateState,
 } from './extensions/runtime'
 import {
-  createPluginHost,
-  type PluginHost,
-  type PluginHostDeps,
-  type PluginHostState,
-} from './extensions/pluginHost'
+  initPluginRuntime,
+  type PluginRuntimeHandles,
+} from './extensions/pluginRuntimeHost'
 import {
   CORE_AI_EXTENSION_ID,
   ensureCoreExtensionsAfterStartup,
@@ -609,7 +607,7 @@ async function restoreConfigFromPayload(payload: ConfigBackupPayload): Promise<{
   if (hasAppLocalScope) {
     await clearAppLocalDataForRestore()
   } else if (pluginFiles > 0) {
-    await removeDirRecursive(PLUGINS_DIR)
+    await removePluginDir(PLUGINS_DIR)
   }
   for (const entry of files) {
     const info = resolveBackupPath(entry?.path || '')
@@ -665,65 +663,6 @@ const builtinPlugins: InstalledPlugin[] = [
   { id: 'uploader-s3', name: '图床 (S3/R2)', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: '粘贴/拖拽图片自动上传，支持 S3/R2 直连，使用设置中的凭据。' },
   { id: 'webdav-sync', name: 'WebDAV 同步', version: 'builtin', enabled: undefined, dir: '', main: '', builtin: true, description: 'F5/启动/关闭前同步，基于修改时间覆盖' }
 ]
-const activePlugins = new Map<string, any>() // id -> module
-const pluginMenuAdded = new Map<string, boolean>() // 限制每个插件仅添加一个菜单项
-const pluginMenuDisposers = new Map<string, Array<() => void>>() // 每个插件对应的菜单清理函数
-// 插件 API 注册表：namespace -> { pluginId, api }
-type PluginAPIRecord = { pluginId: string; api: any }
-const pluginAPIRegistry = new Map<string, PluginAPIRecord>()
-
-// 右键菜单管理
-const pluginContextMenuItems: PluginContextMenuItem[] = [] // 所有插件注册的右键菜单项
-
-// 协同/插件增强：选区变化监听与段落装饰（最小侵入）
-type PluginSelectionHandler = (sel: { start: number; end: number; text: string }) => void
-const pluginSelectionHandlers = new Map<string, PluginSelectionHandler>()
-
-// 插件 Panel 布局管理：侧边/底部 Panel 统一推挤编辑区
-type PluginDockSide = 'left' | 'right' | 'bottom'
-type PluginDockPanelState = { pluginId: string; panelId: string; side: PluginDockSide; size: number; visible: boolean }
-type PluginDockPanelHandle = {
-  setVisible: (visible: boolean) => void
-  setSide: (side: PluginDockSide) => void
-  setSize: (size: number) => void
-  update: (opt: { side?: PluginDockSide; size?: number; visible?: boolean }) => void
-  dispose: () => void
-}
-const pluginDockPanels = new Map<string, PluginDockPanelState>()
-
-function getPluginDockKey(pluginId: string, panelId: string): string {
-  return `${pluginId}::${panelId || 'default'}`
-}
-
-function notifyWorkspaceLayoutChanged(): void {
-  try {
-    const winAny = window as any
-    const fn = winAny && winAny.__onWorkspaceLayoutChanged
-    if (typeof fn === 'function') fn()
-  } catch {}
-}
-
-function updatePluginDockGaps(): void {
-  try {
-    const container = document.querySelector('.container') as HTMLDivElement | null
-    if (!container) return
-    let left = 0
-    let right = 0
-    let bottom = 0
-    for (const panel of pluginDockPanels.values()) {
-      if (!panel || !panel.visible) continue
-      const size = Math.max(0, Number(panel.size) || 0)
-      if (!size) continue
-      if (panel.side === 'left') left += size
-      else if (panel.side === 'right') right += size
-      else if (panel.side === 'bottom') bottom += size
-    }
-    container.style.setProperty('--dock-left-gap', left > 0 ? `${left}px` : '0px')
-    container.style.setProperty('--dock-right-gap', right > 0 ? `${right}px` : '0px')
-    container.style.setProperty('--dock-bottom-gap', bottom > 0 ? `${bottom}px` : '0px')
-    notifyWorkspaceLayoutChanged()
-  } catch {}
-}
 
 async function readUploaderEnabledState(): Promise<boolean> {
   try {
@@ -5144,8 +5083,8 @@ function syncLibraryFloatToggle() {
 }
 
   // 根据当前大纲布局模式应用布局（大纲剥离/嵌入）
-  function applyOutlineLayout() {
-    try {
+function applyOutlineLayout() {
+  try {
       const container = document.querySelector('.container') as HTMLDivElement | null
       const libraryEl = document.getElementById('library') as HTMLDivElement | null
       const outlineEl = document.getElementById('lib-outline') as HTMLDivElement | null
@@ -5171,6 +5110,15 @@ function syncLibraryFloatToggle() {
       container.classList.toggle('with-outline-left', isLeft)
       container.classList.toggle('with-outline-right', !isLeft)
       notifyWorkspaceLayoutChanged()
+    } catch {}
+  }
+
+  // 布局变化通知：供插件/外部代码在库/大纲/Panel 变化时重新计算工作区
+  function notifyWorkspaceLayoutChanged(): void {
+    try {
+      const winAny = window as any
+      const fn = winAny && winAny.__onWorkspaceLayoutChanged
+      if (typeof fn === 'function') fn()
     } catch {}
   }
 
@@ -8717,7 +8665,7 @@ function bindEvents() {
         getActivePluginModule: (id: string) => pluginHost.getActivePluginModule(id),
         coreAiExtensionId: CORE_AI_EXTENSION_ID,
         markCoreExtensionBlocked: (id: string) => markCoreExtensionBlocked(store, id),
-        removePluginDir: (dir: string) => removeDirRecursive(dir),
+        removePluginDir: (dir: string) => removePluginDir(dir),
         openPluginSettings,
       })
     } catch {}
@@ -9018,26 +8966,8 @@ function pluginNotice(msg: string, level: 'ok' | 'err' = 'ok', ms?: number) {
   }
 }
 
-async function getInstalledPlugins(): Promise<Record<string, InstalledPlugin>> {
-  return await loadInstalledPlugins(store)
-}
-
-async function setInstalledPlugins(map: Record<string, InstalledPlugin>): Promise<void> {
-  await saveInstalledPlugins(store, map)
-}
-
-// 插件宿主：封装激活/停用与运行时上下文，避免 main.ts 继续臃肿
-const pluginHostState: PluginHostState = {
-  activePlugins,
-  pluginMenuAdded,
-  pluginMenuDisposers,
-  pluginAPIRegistry,
-  pluginContextMenuItems,
-  pluginSelectionHandlers,
-  pluginDockPanels,
-}
-
-const pluginHostDeps: PluginHostDeps = {
+// 插件运行时宿主：通过 initPluginRuntime 集中管理 PluginHost / 安装 / 更新 等逻辑
+const pluginRuntime: PluginRuntimeHandles = initPluginRuntime({
   getStore: () => store,
   getEditor: () => editor,
   getPreviewRoot: () => preview,
@@ -9071,134 +9001,24 @@ const pluginHostDeps: PluginHostDeps = {
       throw e
     }
   },
-  updatePluginDockGaps: () => updatePluginDockGaps(),
-}
-
-const pluginHost: PluginHost = createPluginHost(pluginHostDeps, pluginHostState)
-
-// 插件市场：通过 extensions/market 模块实现，保留旧 API 名称
-const _pluginMarket = createPluginMarket({
-  getStore: () => store,
-  fetchTextSmart,
 })
 
-async function getMarketUrl(): Promise<string | null> {
-  return _pluginMarket.getMarketUrl()
-}
-
-type PluginMarketChannel = 'github' | 'official'
-
-async function getMarketChannel(): Promise<PluginMarketChannel> {
-  return _pluginMarket.getMarketChannel()
-}
-
-async function setMarketChannel(channel: PluginMarketChannel): Promise<void> {
-  await _pluginMarket.setMarketChannel(channel)
-}
-
-async function loadInstallablePlugins(force = false): Promise<InstallableItem[]> {
-  return _pluginMarket.loadInstallablePlugins(force)
-}
-async function installPluginFromGit(inputRaw: string, opt?: { enabled?: boolean }): Promise<InstalledPlugin> {
-  return await installPluginFromGitCore(inputRaw, opt, {
-    appVersion: APP_VERSION,
-    store,
-  })
-}
-
-// 从本地文件夹安装扩展
-async function installPluginFromLocal(sourcePath: string, opt?: { enabled?: boolean }): Promise<InstalledPlugin> {
-  return await installPluginFromLocalCore(sourcePath, opt, {
-    appVersion: APP_VERSION,
-    store,
-  })
-}
-
-async function activatePlugin(p: InstalledPlugin): Promise<void> {
-  return pluginHost.activatePlugin(p)
-}
-
-async function deactivatePlugin(id: string): Promise<void> {
-  return pluginHost.deactivatePlugin(id)
-}
-
-async function openPluginSettings(p: InstalledPlugin): Promise<void> {
-  return pluginHost.openPluginSettings(p)
-}
-
-// 启动时扩展更新检查：仅在应用启动后后台检查一次
-  async function checkPluginUpdatesOnStartup(): Promise<void> {
-    try {
-      if (!store) return
-      // 只在有安装的扩展且带版本号时才进行检查
-      const installedMap = await getInstalledPlugins()
-      const installedArr = Object.values(installedMap).filter((p) => !!p && !!p.version)
-      if (!installedArr.length) return
-
-      let marketItems: InstallableItem[] = []
-      try {
-        marketItems = await loadInstallablePlugins(false)
-      } catch {
-        marketItems = FALLBACK_INSTALLABLES.slice()
-      }
-      if (!marketItems.length) return
-
-      const updateMap = await getPluginUpdateStates(installedArr, marketItems)
-      const ids = Object.keys(updateMap || {})
-      if (!ids.length) return
-
-      const updatedPlugins = ids
-        .map((id) => installedMap[id])
-        .filter((p): p is InstalledPlugin => !!p)
-
-      if (!updatedPlugins.length) return
-
-      // 构造提示文案（保持多语言）
-      const names = updatedPlugins.map((p) => String(p.name || p.id || '')).filter(Boolean)
-      if (!names.length) return
-
-      let msg = ''
-      if (names.length === 1) {
-        msg = t('ext.update.notice.single')
-          .replace('{name}', names[0])
-      } else {
-        const joined = names.slice(0, 3).join('、')
-        msg = t('ext.update.notice.multi')
-          .replace('{count}', String(names.length))
-          .replace('{names}', joined + (names.length > 3 ? '…' : ''))
-      }
-
-      try {
-        // 使用新的通知系统显示扩展更新通知（5秒后自动消失）
-        NotificationManager.show('extension', msg, 5000)
-      } catch {}
-    } catch (e) {
-      console.warn('[Extensions] 启动扩展更新检查失败', e)
-    }
-  }
-
-// ���°�װָ��������չ���������״̬
-async function updateInstalledPlugin(p: InstalledPlugin, info: PluginUpdateState): Promise<InstalledPlugin> {
-  const enabled = !!p.enabled
-  try { await deactivatePlugin(p.id) } catch {}
-  try { await removeDirRecursive(p.dir) } catch {}
-  const rec = await installPluginFromGit(info.manifestUrl, { enabled })
-  try {
-    if (enabled) await activatePlugin(rec)
-  } catch {}
-  return rec
-}
-
-async function removeDirRecursive(dir: string): Promise<void> {
-  try {
-    const entries = await readDir(dir as any, { baseDir: BaseDirectory.AppLocalData } as any)
-    for (const e of entries as any[]) {
-      if (e.isDir) { await removeDirRecursive(`${dir}/${e.name}`) }
-      else { try { await remove(`${dir}/${e.name}` as any, { baseDir: BaseDirectory.AppLocalData } as any) } catch {} }
-    }
-    try { await remove(dir as any, { baseDir: BaseDirectory.AppLocalData } as any) } catch {}
-  } catch {}
-}
+const {
+  pluginHost,
+  pluginContextMenuItems,
+  updatePluginDockGaps,
+  getInstalledPlugins,
+  setInstalledPlugins,
+  installPluginFromGit,
+  installPluginFromLocal,
+  activatePlugin,
+  deactivatePlugin,
+  openPluginSettings,
+  checkPluginUpdatesOnStartup,
+  updateInstalledPlugin,
+  removePluginDir,
+  loadAndActivateEnabledPlugins,
+} = pluginRuntime
 
 // 简单判断一个字符串是否更像本地路径（用于区分本地/远程安装）
 function isLikelyLocalPath(input: string): boolean {
@@ -9214,49 +9034,6 @@ function isLikelyLocalPath(input: string): boolean {
 async function showExtensionsOverlay(show: boolean): Promise<void> {
   try {
     await panelShowExtensionsOverlay(show)
-  } catch {}
-}
-
-async function loadAndActivateEnabledPlugins(): Promise<void> {
-  try {
-    const map = await getInstalledPlugins()
-    const toEnable = Object.values(map).filter((p) => p.enabled)
-
-    // 向后兼容：为旧插件设置默认 showInMenuBar = true
-    let needSave = false
-    for (const p of toEnable) {
-      if (p.showInMenuBar === undefined) {
-        p.showInMenuBar = true // 旧插件默认独立显示，保持原有行为
-        needSave = true
-      }
-    }
-    if (needSave) {
-      await setInstalledPlugins(map)
-    }
-
-    for (const p of toEnable) {
-      try { await activatePlugin(p) } catch (e) { console.warn('插件激活失败', p.id, e) }
-    }
-    // 如果当前窗口为 AI 独立窗口，尝试自动挂载 AI 助手
-    try {
-      if (location.hash === '#ai-assistant') {
-        const ai = (map as any)['ai-assistant']
-        if (ai) {
-          const mod = activePlugins.get('ai-assistant') as any
-          const ctx = (window as any).__pluginCtx__?.['ai-assistant']
-          if (mod && typeof mod?.standalone === 'function' && ctx) {
-            await mod.standalone(ctx)
-          }
-        }
-        // 独立窗口：隐藏主界面元素，仅保留插件窗口
-        try {
-          const style = document.createElement('style')
-          style.id = 'ai-standalone-style'
-          style.textContent = 'body>*{display:none !important} #ai-assist-win{display:block !important}'
-          document.head.appendChild(style)
-        } catch {}
-      }
-    } catch {}
   } catch {}
 }
 

@@ -5,6 +5,8 @@ export type ContextMenuContext = {
   cursorPosition: number
   mode: 'edit' | 'preview' | 'wysiwyg'
   filePath: string | null
+  // 右键命中的原始 DOM 元素（用于判断是否点在图片等特殊节点上）
+  targetElement?: HTMLElement | null
 }
 
 export type ContextMenuItemConfig = {
@@ -189,7 +191,7 @@ export async function showContextMenu(
   ctx: ContextMenuContext,
   opts: {
     pluginItems: PluginContextMenuItem[]
-    buildBuiltinItems: () => Promise<ContextMenuItemConfig[]>
+    buildBuiltinItems: (ctx: ContextMenuContext) => Promise<ContextMenuItemConfig[]>
   },
 ): Promise<void> {
   try {
@@ -209,7 +211,7 @@ export async function showContextMenu(
       pluginId: item.pluginId,
     }))
 
-    const builtinItems = await opts.buildBuiltinItems()
+    const builtinItems = await opts.buildBuiltinItems(ctx)
     if (builtinItems.length > 0) {
       if (allItems.length > 0) {
         allItems.push({ config: { label: '', divider: true }, isBuiltin: true })

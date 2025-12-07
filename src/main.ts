@@ -31,6 +31,7 @@ import { appLocalDataDir } from '@tauri-apps/api/path'
 import fileTree, { FOLDER_ICONS, folderIconModal } from './fileTree'
 import { uploadImageToS3R2, type UploaderConfig } from './uploader/s3'
 import { openUploaderDialog as openUploaderDialogInternal, testUploaderConnectivity } from './uploader/uploaderDialog'
+import { uploadImageFromContextMenu } from './uploader/manualImageUpload'
 import { transcodeToWebpIfNeeded } from './utils/image'
 import { saveImageToLocalAndGetPathCore, toggleUploaderEnabledFromMenuCore } from './core/imagePaste'
 // 方案A：多库管理（统一 libraries/activeLibraryId）
@@ -819,7 +820,7 @@ async function togglePortableModeFromMenu(): Promise<void> {
   }
 }
 
-async function buildBuiltinContextMenuItems(): Promise<ContextMenuItemConfig[]> {
+async function buildBuiltinContextMenuItems(ctx: ContextMenuContext): Promise<ContextMenuItemConfig[]> {
   const items: ContextMenuItemConfig[] = []
   const syncCfg = await (async () => { try { return await getWebdavSyncConfig() } catch { return null as any } })()
   const syncEnabled = !!syncCfg?.enabled
@@ -846,6 +847,21 @@ async function buildBuiltinContextMenuItems(): Promise<ContextMenuItemConfig[]> 
     icon: '🖼️',
     onClick: async () => { await toggleUploaderEnabledFromMenu() }
   })
+  // 右键图片：手动上传当前图片到图床（不依赖全局开关）
+  try {
+    const target = ctx.targetElement as HTMLElement | undefined | null
+    const img = target?.closest('img') as HTMLImageElement | null
+    if (img && (ctx.mode === 'preview' || ctx.mode === 'wysiwyg')) {
+      items.push({
+        label: '上传此图片到图床',
+        icon: '☁️',
+        tooltip: '即使关闭自动图床，也可单独上传当前图片；上传后会生成 Markdown 并复制到剪贴板',
+        onClick: async (c) => {
+          await uploadImageFromContextMenu(c)
+        },
+      })
+    }
+  } catch {}
   items.push({ divider: true })
   items.push({
     label: t('menu.exportConfig') || '导出配置',
@@ -871,7 +887,7 @@ async function buildBuiltinContextMenuItems(): Promise<ContextMenuItemConfig[]> 
 // ============ 右键菜单系统 ============
 
 // 构建右键菜单上下文
-function buildContextMenuContext(): ContextMenuContext {
+function buildContextMenuContext(e: MouseEvent): ContextMenuContext {
   try {
     const sel = editor.selectionStart || 0
     const end = editor.selectionEnd || 0
@@ -886,14 +902,16 @@ function buildContextMenuContext(): ContextMenuContext {
       selectedText: text,
       cursorPosition: sel,
       mode: wysiwygV2Active ? 'wysiwyg' : mode,
-      filePath: currentFilePath
+      filePath: currentFilePath,
+      targetElement: (e.target as HTMLElement | null) || null,
     }
   } catch {
     return {
       selectedText: '',
       cursorPosition: 0,
       mode: mode,
-      filePath: currentFilePath
+      filePath: currentFilePath,
+      targetElement: (e.target as HTMLElement | null) || null,
     }
   }
 }
@@ -915,39 +933,36 @@ function initContextMenuListener() {
   try {
     // 监听编辑器的右键事件
     editor.addEventListener('contextmenu', (e) => {
-      if (pluginContextMenuItems.length > 0 && !e.shiftKey) {
-        e.preventDefault()
-        const ctx = buildContextMenuContext()
-        void showContextMenu(e.clientX, e.clientY, ctx, {
-          pluginItems: pluginContextMenuItems,
-          buildBuiltinItems: buildBuiltinContextMenuItems,
-        })
-      }
+      if (e.shiftKey) return
+      try { e.preventDefault() } catch {}
+      const ctx = buildContextMenuContext(e)
+      void showContextMenu(e.clientX, e.clientY, ctx, {
+        pluginItems: pluginContextMenuItems,
+        buildBuiltinItems: buildBuiltinContextMenuItems,
+      })
     })
 
     // 监听预览区域的右键事件
     const preview = document.querySelector('.preview') as HTMLElement
     if (preview) {
       preview.addEventListener('contextmenu', (e) => {
-        if (pluginContextMenuItems.length > 0 && !e.shiftKey) {
-          e.preventDefault()
-          const ctx = buildContextMenuContext()
-          void showContextMenu(e.clientX, e.clientY, ctx, {
-            pluginItems: pluginContextMenuItems,
-            buildBuiltinItems: buildBuiltinContextMenuItems,
-          })
-        }
+        if (e.shiftKey) return
+        try { e.preventDefault() } catch {}
+        const ctx = buildContextMenuContext(e)
+        void showContextMenu(e.clientX, e.clientY, ctx, {
+          pluginItems: pluginContextMenuItems,
+          buildBuiltinItems: buildBuiltinContextMenuItems,
+        })
       })
     }
 
     document.addEventListener('contextmenu', (e) => {
       if (!wysiwygV2Active) return
-      if (pluginContextMenuItems.length === 0) return
       if (e.shiftKey) return
       const root = document.getElementById('md-wysiwyg-root') as HTMLElement | null
       if (!root || !root.contains(e.target as Node)) return
-      e.preventDefault()
-      const ctx = buildContextMenuContext()
+      try { e.preventDefault() } catch {}
+      const ctx = buildContextMenuContext(e)
       void showContextMenu(e.clientX, e.clientY, ctx, {
         pluginItems: pluginContextMenuItems,
         buildBuiltinItems: buildBuiltinContextMenuItems,

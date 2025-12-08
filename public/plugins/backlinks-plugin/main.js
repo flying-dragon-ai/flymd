@@ -389,14 +389,7 @@ function decoratePreviewWikiLinks(context) {
     const root = context.getPreviewElement()
     if (!root) return
 
-    // 如果预览根节点发生变化，重新绑定点击事件
-    if (_previewClickRoot && _previewClickHandler && _previewClickRoot !== root) {
-      try {
-        _previewClickRoot.removeEventListener('click', _previewClickHandler, true)
-      } catch {}
-      _previewClickHandler = null
-      _previewClickRoot = null
-    }
+    const re = /\[\[([^\]]+)\]\]/g
 
     // 先移除旧的包装，避免重复嵌套
     root.querySelectorAll('.flymd-wikilink').forEach((el) => {
@@ -413,8 +406,6 @@ function decoratePreviewWikiLinks(context) {
     while ((n = walker.nextNode())) {
       nodes.push(n)
     }
-
-    const re = /\[\[([^\]]+)\]\]/g
 
     nodes.forEach((node) => {
       try {
@@ -466,9 +457,7 @@ function decoratePreviewWikiLinks(context) {
       _previewClickHandler = (ev) => {
         try {
           const target = ev.target
-          // 使用最新的 root 引用，而不是闭包里的老 root
-          const curRoot = _previewClickRoot || context.getPreviewElement()
-          if (!curRoot || !curRoot.contains(target)) return
+          if (!target) return
           const el = target.closest && target.closest('.flymd-wikilink')
           if (!el) return
           const coreText = String(el.textContent || '')
@@ -480,11 +469,7 @@ function decoratePreviewWikiLinks(context) {
           openWikiLinkTarget(context, core)
         } catch {}
       }
-    }
-    if (root && _previewClickHandler) {
-      try { root.removeEventListener('click', _previewClickHandler, true) } catch {}
-      root.addEventListener('click', _previewClickHandler, true)
-      _previewClickRoot = root
+      document.addEventListener('click', _previewClickHandler, true)
     }
   } catch (e) {
     console.error('[backlinks] decoratePreviewWikiLinks 失败', e)
@@ -494,25 +479,11 @@ function decoratePreviewWikiLinks(context) {
 // 所见模式：点击 [[名称]] 时跳转到对应文档（不改 Milkdown DOM，仅拦截点击）
 function bindWysiwygWikiLinkClicks(context) {
   try {
-    if (_wysiwygClickHandler) return
-    _wysiwygClickHandler = (ev) => {
-      try {
-        const container = document.querySelector('.container')
-        if (!container || !container.classList.contains('wysiwyg-v2')) return
-        const root = document.getElementById('md-wysiwyg-root')
-        if (!root || !root.contains(ev.target)) return
-        if (ev.button !== 0) return
-
-        const hit = findWikiLinkAtSelection()
-        if (!hit) return
-
-        ev.preventDefault()
-        ev.stopPropagation()
-        openWikiLinkTarget(context, hit.core)
-      } catch {}
+    // 所见模式下不做任何拦截，保留为普通文字点击行为
+    if (_wysiwygClickHandler) {
+      try { document.removeEventListener('click', _wysiwygClickHandler, true) } catch {}
+      _wysiwygClickHandler = null
     }
-    // 使用冒泡阶段，确保浏览器已更新 Selection 位置
-    document.addEventListener('click', _wysiwygClickHandler, false)
   } catch (e) {
     console.error('[backlinks] 绑定所见模式 wiki 链接点击失败', e)
   }

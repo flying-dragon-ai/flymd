@@ -1,9 +1,9 @@
 {
   "id": "flymd-backlinks",
   "name": "双向链接（Backlinks）",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "flyMD user",
-  "description": "为 flyMD 提供类似 Obsidian 的双向链接/反向链接侧边面板，基于 [[名称]] 语法自动建立文档之间的引用关系。",
+  "description": "提供双向链接/反向链接侧边面板。（暂不支持所见模式）",
   "main": "main.js",
   "minHostVersion": "0.3.0",
   "homepage": "https://github.com/your-name/flymd-backlinks",

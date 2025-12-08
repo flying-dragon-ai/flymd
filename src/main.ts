@@ -5882,9 +5882,26 @@ async function ensureMinWindowSize(): Promise<void> {
     const size = await win.innerSize()
     const minW = 960
     const minH = 640
-    if (size.width < minW || size.height < minH) {
+
+    // 屏幕尺寸：用于避免窗口被恢复到远大于屏幕的异常尺寸
+    const screenW = window?.screen?.availWidth || window?.screen?.width || 0
+    const screenH = window?.screen?.availHeight || window?.screen?.height || 0
+    const maxScale = 1.2
+
+    let targetW = size.width
+    let targetH = size.height
+
+    // 下限：至少保持默认窗口大小
+    if (targetW < minW) targetW = minW
+    if (targetH < minH) targetH = minH
+
+    // 上限：不超过屏幕尺寸的一定倍数，避免“无限变长”的异常情况
+    if (screenW && targetW > screenW * maxScale) targetW = Math.round(screenW * maxScale)
+    if (screenH && targetH > screenH * maxScale) targetH = Math.round(screenH * maxScale)
+
+    if (targetW !== size.width || targetH !== size.height) {
       const { LogicalSize } = await import('@tauri-apps/api/dpi')
-      await win.setSize(new LogicalSize(minW, minH))
+      await win.setSize(new LogicalSize(targetW, targetH))
     }
   } catch {}
 }

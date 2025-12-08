@@ -80,6 +80,25 @@ function normalizeLines(s: string): string {
   return s.replace(/\n{3,}/g, '\n\n')
 }
 
+function postProcessMarkdown(md: string): string {
+  let result = md
+
+  // 1. 清理行内代码间的多余换行：`code`\n/\n`code` → `code` / `code`
+  result = result.replace(/(`[^`]+`)\s*\n\s*\/\s*\n\s*(`[^`]+`)/g, '$1 / $2')
+
+  // 2. 压缩列表项内的多余空行
+  result = result.replace(/(^[ \t]*[-*+\d]+\.[ \t]+.+?)(\n{2,})(?=[ \t]+)/gm, '$1\n')
+
+  // 3. 清理块级元素边界的过多空行（保留最多 2 个换行）
+  result = result.replace(/\n{3,}/g, '\n\n')
+
+  // 4. 移除行内强调符号周围的换行：**\ntext\n** → **text**
+  result = result.replace(/(\*\*|__|~~|`)\s*\n\s*/g, '$1')
+  result = result.replace(/\s*\n\s*(\*\*|__|~~|`)/g, '$1')
+
+  return result
+}
+
 function textContentOf(node: Node): string {
   return (node as any).textContent || ''
 }
@@ -105,6 +124,8 @@ type Ctx = {
   orderedStack: boolean[]
   orderedIndex: number[]
   baseUrl?: string
+  inInlineContext: boolean  // 是否在行内元素内（<a>、<li> 首行等）
+  inListItem: boolean       // 是否在列表项内
 }
 
 function renderList(el: Element, ctx: Ctx, ordered: boolean): string {
@@ -132,14 +153,18 @@ function renderList(el: Element, ctx: Ctx, ordered: boolean): string {
 }
 
 function renderListItem(li: Element, ctx: Ctx): string {
-  // 将 li 的子节点作为块内容渲染，但避免在首行前后额外空行
+  // 标记列表项上下文
+  const liCtx = { ...ctx, inListItem: true, inInlineContext: true }
   const parts: string[] = []
+
   for (const child of Array.from(li.childNodes)) {
-    const md = renderNode(child, ctx)
+    const md = renderNode(child, liCtx)
     if (!md) continue
     parts.push(md)
   }
-  return parts.join('\n').replace(/\n{3,}/g, '\n\n')
+
+  // 压缩列表项内的多余换行
+  return parts.join(' ').replace(/\s+/g, ' ').trim()
 }
 
 function renderTable(table: Element, ctx: Ctx): string {
@@ -192,7 +217,17 @@ function absolutizeUrl(href: string, base?: string): string {
 function renderNode(node: Node, ctx: Ctx): string {
   if (!node) return ''
   if (node.nodeType === Node.TEXT_NODE) {
-    const t = (node.nodeValue || '').replace(/\s+/g, (m) => (m.includes('\n') ? '\n' : ' '))
+    let t = node.nodeValue || ''
+
+    if (ctx.inInlineContext) {
+      // 行内上下文：所有连续空白（包括换行）合并为单个空格
+      t = t.replace(/\s+/g, ' ')
+    } else {
+      // 块级上下文：保留有意义的换行，但压缩连续空白
+      t = t.replace(/[ \t\f\v]+/g, ' ')  // 横向空白合并为单个空格
+      t = t.replace(/\n[ \t]*/g, '\n')    // 移除换行符后的缩进空格
+    }
+
     return escapeMd(t)
   }
   if (node.nodeType !== Node.ELEMENT_NODE) return ''
@@ -202,7 +237,12 @@ function renderNode(node: Node, ctx: Ctx): string {
   // 忽略脚本类标签
   if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'META' || tag === 'LINK') return ''
 
-  if (tag === 'BR') return '  \n'
+  if (tag === 'BR') {
+    // 在行内上下文或列表项中，BR 转为空格
+    if (ctx.inInlineContext) return ' '
+    // 在块级上下文中，BR 转为 Markdown 硬换行
+    return '  \n'
+  }
   if (tag === 'HR') return '\n\n---\n\n'
 
   if (tag === 'IMG') {
@@ -216,7 +256,8 @@ function renderNode(node: Node, ctx: Ctx): string {
   if (tag === 'A') {
     const href = getAttr(el, 'href') || ''
     const title = getAttr(el, 'title')
-    const text = trimBlankLines(renderInlineChildren(el, ctx)) || (getAttr(el, 'href') || '')
+    const inlineCtx = { ...ctx, inInlineContext: true }
+    const text = trimBlankLines(renderInlineChildren(el, inlineCtx)) || (getAttr(el, 'href') || '')
     const url = absolutizeUrl(href, ctx.baseUrl)
     return `[${text}](${url}${title ? ' "' + escapeMd(title) + '"' : ''})`
   }
@@ -260,7 +301,8 @@ function renderNode(node: Node, ctx: Ctx): string {
 
   // 样式驱动的强调（span 等）
   if (isBoldLike(el) || isItalicLike(el) || isStrikeLike(el)) {
-    const content = renderInlineChildren(el, ctx)
+    const inlineCtx = { ...ctx, inInlineContext: true }
+    const content = renderInlineChildren(el, inlineCtx)
     let out = content
     if (isBoldLike(el)) out = `**${out}**`
     if (isItalicLike(el)) out = `*${out}*`
@@ -270,8 +312,14 @@ function renderNode(node: Node, ctx: Ctx): string {
 
   // 常规块：拼接子节点，并在块边界添加空行
   if (isBlock(el)) {
-    const inner = trimBlankLines(renderInlineChildren(el, ctx))
+    const blockCtx = { ...ctx, inInlineContext: false }
+    const inner = trimBlankLines(renderInlineChildren(el, blockCtx))
     if (!inner) return ''
+
+    // 根据嵌套深度调整边界换行
+    if (ctx.inListItem && ctx.listDepth > 0) {
+      return `\n${inner}\n`  // 列表项内使用单换行
+    }
     return `\n\n${inner}\n\n`
   }
 
@@ -288,11 +336,13 @@ export function htmlToMarkdown(html: string, opts: Opts = {}): string {
   const root = doc.getElementById('__root__') as HTMLElement | null
   if (!root) return ''
 
-  const ctx: Ctx = { listDepth: 0, orderedStack: [], orderedIndex: [], baseUrl: opts.baseUrl }
+  const ctx: Ctx = { listDepth: 0, orderedStack: [], orderedIndex: [], baseUrl: opts.baseUrl, inInlineContext: false, inListItem: false }
   let out = ''
   for (const child of Array.from(root.childNodes)) {
     out += renderNode(child, ctx)
   }
+  // 应用后处理清理
+  out = postProcessMarkdown(out)
   out = normalizeLines(trimBlankLines(out))
   // 收尾清理：去除两端多余空行
   return out.trim() + '\n'

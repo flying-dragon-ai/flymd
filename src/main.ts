@@ -827,12 +827,14 @@ async function togglePortableModeFromMenu(): Promise<void> {
     const enabled = await isPortableModeEnabled()
     const next = !enabled
     await setPortableModeEnabled(next)
-  if (next) {
-    await exportPortableBackupSilent()
-    pluginNotice(t('portable.enabled') || '便携模式已开启，所有配置写入根目录方便携带', 'ok', 2000)
-  } else {
-    pluginNotice(t('portable.disabled') || '便携模式已关闭', 'ok', 2000)
-  }
+    if (next) {
+      // 显式提示：正在开启便携模式（导出配置可能需要时间）
+      pluginNotice(t('portable.enabling') || '正在开启便携模式…', 'ok', 3000)
+      await exportPortableBackupSilent()
+      pluginNotice(t('portable.enabled') || '便携模式已开启，所有配置写入根目录方便携带', 'ok', 2000)
+    } else {
+      pluginNotice(t('portable.disabled') || '便携模式已关闭', 'ok', 2000)
+    }
   } catch (err) {
     console.error('toggle portable mode failed', err)
     pluginNotice(t('portable.toggleFail') || '切换便携模式失败', 'err', 2200)

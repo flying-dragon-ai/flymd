@@ -156,6 +156,17 @@
     },
     {
       "homepage": "https://github.com/flyhunterl/flymd",
+      "name": "Word/Excel 导入工具",
+      "description": "从本地 Word / Excel 文件解析并导入为 Markdown。",
+      "author": "flyMD",
+      "id": "office-importer",
+      "install": {
+        "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/office-importer/manifest.json",
+        "type": "manifest"
+      }
+    },
+    {
+      "homepage": "https://github.com/flyhunterl/flymd",
       "name": "Git 版本管理",
       "description": "为当前库和文档提供 Git 快照与历史查看侧栏，并支持一键回滚到指定版本。",
       "author": "flyMD",

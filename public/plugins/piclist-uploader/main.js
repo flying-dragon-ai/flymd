@@ -3,6 +3,16 @@
 
 const STORAGE_KEY = 'piclistUploaderConfig_v1'
 let _settingsRoot = null
+const DEBUG = true
+
+function debugLog(...args) {
+  if (!DEBUG) return
+  try {
+    // 统一前缀，方便在控制台过滤
+    // eslint-disable-next-line no-console
+    console.log('[piclist-uploader]', ...args)
+  } catch {}
+}
 
 // 默认配置：尽量贴合 PicList 内置 Server 文档
 function getDefaultConfig() {
@@ -21,18 +31,23 @@ function getDefaultConfig() {
 // 安全加载配置
 async function loadConfig(context) {
   try {
+    debugLog('loadConfig: start')
     const raw = await context.storage.get(STORAGE_KEY)
     if (!raw || typeof raw !== 'object') {
+      debugLog('loadConfig: no stored config, use default')
       return getDefaultConfig()
     }
     const def = getDefaultConfig()
-    return {
+    const cfg = {
       host: typeof raw.host === 'string' && raw.host.trim() ? raw.host.trim() : def.host,
       key: typeof raw.key === 'string' ? raw.key.trim() : '',
       picbed: typeof raw.picbed === 'string' ? raw.picbed.trim() : '',
       configName: typeof raw.configName === 'string' ? raw.configName.trim() : '',
     }
+    debugLog('loadConfig: resolved config =', cfg)
+    return cfg
   } catch {
+    debugLog('loadConfig: failed, fallback default')
     return getDefaultConfig()
   }
 }
@@ -41,6 +56,7 @@ async function loadConfig(context) {
 async function saveConfig(context, cfg) {
   try {
     const next = Object.assign(getDefaultConfig(), cfg || {})
+    debugLog('saveConfig: saving', next)
     await context.storage.set(STORAGE_KEY, next)
     return next
   } catch {
@@ -72,6 +88,7 @@ function looksLikeImageText(text) {
 // 从 Markdown 图片语法或原始文本中提取图片相对/绝对路径，以及原始 alt/title
 function extractImageInfoFromSelection(raw) {
   const text = String(raw || '').trim()
+  debugLog('extractImageInfoFromSelection: raw =', raw)
   if (!text) return null
 
   // 1) Markdown 语法：![alt](path "title")
@@ -79,21 +96,36 @@ function extractImageInfoFromSelection(raw) {
   if (mMd) {
     const alt = (mMd[1] || '').trim()
     let inner = (mMd[2] || '').trim()
-    // 只取第一个空白前的部分作为路径，其余当作 title
-    const firstSpace = inner.search(/\s/)
     let path = inner
     let title = ''
-    if (firstSpace > 0) {
-      path = inner.slice(0, firstSpace)
-      title = inner.slice(firstSpace).trim()
+
+    // 支持形如 ![alt](<path with spaces> "title") 的语法
+    if (inner.startsWith('<')) {
+      const closeIdx = inner.indexOf('>')
+      if (closeIdx >= 0) {
+        path = inner.slice(0, closeIdx + 1)
+        title = inner.slice(closeIdx + 1).trim()
+      }
+    } else {
+      // 只取第一个空白前的部分作为路径，其余当作 title
+      const firstSpace = inner.search(/\s/)
+      if (firstSpace > 0) {
+        path = inner.slice(0, firstSpace)
+        title = inner.slice(firstSpace).trim()
+      }
     }
+
+    // 去掉包裹的尖括号和引号
+    path = path.replace(/^<|>$/g, '')
     path = path.replace(/^['"]|['"]$/g, '')
-    return {
+    const info = {
       mode: 'markdown',
       alt,
       title,
       path,
     }
+    debugLog('extractImageInfoFromSelection: markdown parsed =', info)
+    return info
   }
 
   // 2) Obsidian 风格：![[file.png]] 或 ![[file|alias]]
@@ -102,12 +134,14 @@ function extractImageInfoFromSelection(raw) {
     const inner = (mOb[1] || '').trim()
     const pipeIdx = inner.indexOf('|')
     const core = pipeIdx >= 0 ? inner.slice(0, pipeIdx).trim() : inner
-    return {
+    const info = {
       mode: 'wikilink',
       alt: inner,
       title: '',
       path: core,
     }
+    debugLog('extractImageInfoFromSelection: wikilink parsed =', info)
+    return info
   }
 
   // 3) 直接当作路径
@@ -115,22 +149,26 @@ function extractImageInfoFromSelection(raw) {
   p = p.split(/[?#]/)[0]
   if (!p) return null
 
-  return {
+  const info = {
     mode: 'path',
     alt: '',
     title: '',
     path: p,
   }
+  debugLog('extractImageInfoFromSelection: path parsed =', info)
+  return info
 }
 
 // 基于当前文件路径与图片相对路径，拼出一个尽量可用的本地绝对路径
 function resolveImageAbsolutePath(imagePath, filePath) {
   if (!imagePath) return null
   let p = String(imagePath).trim()
+  debugLog('resolveImageAbsolutePath: input =', imagePath, 'filePath =', filePath)
   if (!p) return null
 
   // 已经是绝对路径（Windows / UNC / *nix）
   if (/^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\') || p.startsWith('/')) {
+    debugLog('resolveImageAbsolutePath: already absolute =', p)
     return p
   }
 
@@ -147,7 +185,9 @@ function resolveImageAbsolutePath(imagePath, filePath) {
 
   // 粗暴拼接：不做规范化，让底层系统自己处理 .. 等
   const normalizedRel = p.replace(/[\\/]/g, sep)
-  return dir + sep + normalizedRel
+  const full = dir + sep + normalizedRel
+  debugLog('resolveImageAbsolutePath: resolved =', full)
+  return full
 }
 
 // 调用 PicList HTTP Server 上传指定本地路径的图片
@@ -158,37 +198,33 @@ async function uploadViaPicList(context, absPath) {
 
   const cfg = await loadConfig(context)
   const base = (cfg.host || '').trim() || 'http://127.0.0.1:36677'
-  const urlBase = base.replace(/\/+$/, '')
 
-  const searchParams = []
-  if (cfg.key) searchParams.push('key=' + encodeURIComponent(cfg.key))
-  if (cfg.picbed) searchParams.push('picbed=' + encodeURIComponent(cfg.picbed))
-  if (cfg.configName) searchParams.push('configName=' + encodeURIComponent(cfg.configName))
-  const qs = searchParams.length ? '?' + searchParams.join('&') : ''
-
-  const url = urlBase + '/upload' + qs
-
-  // 按 PicList 文档要求：POST JSON { list: ['xxx.jpg'] }
-  const resp = await context.http.fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ list: [absPath] }),
-  })
-
-  let data = null
-  try {
-    data = await resp.json()
-  } catch (e) {
-    throw new Error('解析 PicList 返回数据失败：' + (e && e.message ? e.message : String(e || '未知错误')))
+  // 优先走后端命令，避免前端 HTTP scope 限制
+  if (typeof context.invoke === 'function') {
+    try {
+      debugLog('uploadViaPicList: using backend command flymd_piclist_upload')
+      const urlFromCmd = await context.invoke('flymd_piclist_upload', {
+        host: base,
+        key: cfg.key || '',
+        picbed: cfg.picbed || '',
+        configName: cfg.configName || '',
+        path: absPath,
+      })
+      if (typeof urlFromCmd === 'string' && urlFromCmd.trim()) {
+        const finalUrl = urlFromCmd.trim()
+        debugLog('uploadViaPicList: backend returned url =', finalUrl)
+        return finalUrl
+      }
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : String(e || '')
+      debugLog('uploadViaPicList: backend command failed =', msg)
+      // 后端命令执行失败（例如老版本未实现、PicList 返回错误等），统一抛给上层处理
+      throw new Error(msg || 'PicList 后端上传失败')
+    }
   }
 
-  if (!data || data.success !== true || !Array.isArray(data.result) || !data.result[0]) {
-    throw new Error('PicList 返回失败：' + JSON.stringify(data || {}, null, 2))
-  }
-
-  return String(data.result[0])
+  // 理论上不会走到这里（仅在极旧版本或非常规环境下），简单兜底一个错误
+  throw new Error('当前 FlyMD 版本不支持 PicList 后端上传命令')
 }
 
 // 将选中的文本替换为带图床 URL 的 Markdown 语法，尽量保留原来的 alt/title
@@ -218,8 +254,177 @@ function buildReplacementMarkdown(info, remoteUrl) {
   return url
 }
 
+// 自动粘贴上传相关状态
+const _autoProcessedPaths = new Set()
+let _autoUploading = false
+
+// 判断是否是“粘贴生成的本地图片路径”，尽量避免误伤用户手动写的本地图片引用
+function isPastedLocalImage(info) {
+  if (!info || !info.path) return false
+  const raw = String(info.path || '').trim()
+  debugLog('isPastedLocalImage: path =', raw)
+  if (!raw) return false
+  if (/^https?:\/\//i.test(raw)) return false
+  if (/^data:/i.test(raw)) return false
+  if (!/\.(png|jpe?g|gif|bmp|svg|webp)$/i.test(raw)) return false
+  // flyMD 默认的粘贴命名中包含 pasted-，仅对这类路径自动上传，避免动到用户已有本地图片
+  if (!raw.toLowerCase().includes('pasted-')) return false
+  return true
+}
+
+async function autoUploadOnePastedImage(context) {
+  if (!context || typeof context.getEditorValue !== 'function') return false
+  const text = String(context.getEditorValue() || '')
+  debugLog('autoUploadOnePastedImage: editor text length =', text.length)
+  if (!text) return false
+
+  const re = /!\[[^\]]*]\(([^)]+)\)/g
+  let m
+  while ((m = re.exec(text)) != null) {
+    const full = m[0]
+    const start = m.index
+    const end = start + full.length
+    debugLog('autoUploadOnePastedImage: candidate =', full, 'range =', start, end)
+    const info = extractImageInfoFromSelection(full)
+    if (!info || !info.path) continue
+    if (!isPastedLocalImage(info)) continue
+
+    const key = String(info.path)
+    if (_autoProcessedPaths.has(key)) {
+      debugLog('autoUploadOnePastedImage: already processed path =', key)
+      continue
+    }
+
+    const filePath =
+      (typeof context.getCurrentFilePath === 'function' && context.getCurrentFilePath()) || null
+    const absPath = resolveImageAbsolutePath(info.path, filePath)
+    debugLog('autoUploadOnePastedImage: will upload absPath =', absPath, 'filePath =', filePath)
+
+    try {
+      const url = await uploadViaPicList(context, absPath)
+      const replacement = buildReplacementMarkdown(info, url)
+      if (!replacement) {
+        _autoProcessedPaths.add(key)
+        debugLog('autoUploadOnePastedImage: replacement empty, skip')
+        return false
+      }
+
+      if (typeof context.replaceRange === 'function') {
+        context.replaceRange(start, end, replacement)
+      } else if (typeof context.setEditorValue === 'function') {
+        const before = text.slice(0, start)
+        const after = text.slice(end)
+        context.setEditorValue(before + replacement + after)
+      }
+
+      if (context.ui && typeof context.ui.notice === 'function') {
+        context.ui.notice('图片已自动上传至 PicList', 'ok', 2000)
+      }
+
+      _autoProcessedPaths.add(key)
+      debugLog('autoUploadOnePastedImage: success for', key)
+      return true
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e || '未知错误')
+      if (context.ui && typeof context.ui.notice === 'function') {
+        context.ui.notice('PicList 自动上传失败：' + msg, 'err', 3200)
+      }
+      _autoProcessedPaths.add(key)
+      debugLog('autoUploadOnePastedImage: failed for', info.path, 'error =', e)
+      return false
+    }
+  }
+
+  return false
+}
+
+async function autoUploadNewPastedImages(context) {
+  if (_autoUploading) return
+  _autoUploading = true
+  debugLog('autoUploadNewPastedImages: start')
+  try {
+    // 单次最多处理少量图片，避免长时间阻塞
+    for (let i = 0; i < 4; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      const handled = await autoUploadOnePastedImage(context)
+      if (!handled) break
+    }
+  } finally {
+    debugLog('autoUploadNewPastedImages: end')
+    _autoUploading = false
+  }
+}
+
+function bindAutoUploadOnPaste(context) {
+  if (typeof document === 'undefined') return
+  try {
+    const bindSourceEditor = () => {
+      const editor =
+        document.getElementById('editor') || document.querySelector('textarea.editor')
+      if (!editor) return false
+      const anyEditor = /** @type {any} */ (editor)
+      if (anyEditor._piclistAutoPasteBound) return true
+
+      const handler = () => {
+        debugLog('paste event captured on source editor, scheduling auto upload')
+        // 等宿主完成粘贴插入，再扫描并替换
+        setTimeout(() => {
+          autoUploadNewPastedImages(context).catch(() => {})
+        }, 160)
+      }
+
+      editor.addEventListener('paste', handler, true)
+      anyEditor._piclistAutoPasteBound = true
+      debugLog('bindAutoUploadOnPaste: bound on source editor', editor)
+      return true
+    }
+
+    const bindWysiwyg = () => {
+      // 所见模式下的 ProseMirror 根节点
+      const pm =
+        document.querySelector('.container.wysiwyg-v2 .ProseMirror') ||
+        document.querySelector('#md-wysiwyg-root .ProseMirror')
+      if (!pm) return false
+      const anyPm = /** @type {any} */ (pm)
+      if (anyPm._piclistAutoPasteBound) return true
+
+      const handler = () => {
+        debugLog('paste event captured on ProseMirror, scheduling auto upload')
+        setTimeout(() => {
+          autoUploadNewPastedImages(context).catch(() => {})
+        }, 200)
+      }
+
+      pm.addEventListener('paste', handler, true)
+      anyPm._piclistAutoPasteBound = true
+      debugLog('bindAutoUploadOnPaste: bound on ProseMirror', pm)
+      return true
+    }
+
+    const tryBind = () => {
+      const a = bindSourceEditor()
+      const b = bindWysiwyg()
+      return a || b
+    }
+
+    if (!tryBind()) {
+      debugLog('bindAutoUploadOnPaste: editor/ProseMirror not ready, will retry')
+      const timer = setInterval(() => {
+        if (tryBind()) {
+          debugLog('bindAutoUploadOnPaste: bind success after retry')
+          clearInterval(timer)
+        }
+      }, 600)
+    }
+  } catch {}
+}
+
 export async function activate(context) {
+  debugLog('activate: PicList uploader plugin activated')
   context.ui.notice && context.ui.notice('PicList 图床插件已激活', 'ok', 2000)
+
+  // 绑定粘贴事件：检测由粘贴生成的本地 pasted- 图片路径，并自动上传到 PicList
+  bindAutoUploadOnPaste(context)
 
   // 顶部菜单：仅做一个简单入口，方便用户测试是否能成功上传
   context.addMenuItem &&
@@ -232,6 +437,7 @@ export async function activate(context) {
           note: '仅源码模式，选中图片路径或 Markdown 语法',
           onClick: async () => {
             try {
+              debugLog('menu.uploadSelected: clicked')
               const sel = context.getSelection ? context.getSelection() : null
               const full = context.getEditorValue ? context.getEditorValue() : ''
               if (!sel || typeof sel.start !== 'number' || typeof sel.end !== 'number' || sel.end <= sel.start) {
@@ -239,12 +445,14 @@ export async function activate(context) {
                 return
               }
               const raw = String(full || '').slice(sel.start, sel.end)
+              debugLog('menu.uploadSelected: selected raw =', raw)
               if (!looksLikeImageText(raw)) {
                 context.ui.notice('选中文本不像是图片路径或 Markdown 图片语法', 'err', 2600)
                 return
               }
 
               const info = extractImageInfoFromSelection(raw)
+              debugLog('menu.uploadSelected: parsed info =', info)
               if (!info || !info.path) {
                 context.ui.notice('无法从选中文本解析出图片路径', 'err', 2600)
                 return
@@ -253,6 +461,7 @@ export async function activate(context) {
               const filePath =
                 (typeof context.getCurrentFilePath === 'function' && context.getCurrentFilePath()) || null
               const absPath = resolveImageAbsolutePath(info.path, filePath)
+              debugLog('menu.uploadSelected: absPath =', absPath, 'filePath =', filePath)
               const url = await uploadViaPicList(context, absPath)
 
               const replacement = buildReplacementMarkdown(info, url)
@@ -283,7 +492,6 @@ export async function activate(context) {
   if (typeof context.addContextMenuItem === 'function') {
     context.addContextMenuItem({
       label: '使用 PicList 上传图片',
-      note: '选中图片路径或 Markdown 图片语法',
       condition: (ctx) => {
         // 仅在源码模式有效
         if (!ctx || ctx.mode !== 'edit') return false
@@ -293,8 +501,10 @@ export async function activate(context) {
       },
       onClick: async (ctx) => {
         try {
+          debugLog('contextMenu.uploadSelected: clicked ctx =', ctx)
           if (!ctx) return
           const selected = (ctx.selectedText || '').trim()
+          debugLog('contextMenu.uploadSelected: selected =', selected)
           if (!selected) {
             context.ui.notice('请先选中图片路径或 Markdown 图片语法', 'err', 2400)
             return
@@ -305,6 +515,7 @@ export async function activate(context) {
           }
 
           const info = extractImageInfoFromSelection(selected)
+          debugLog('contextMenu.uploadSelected: parsed info =', info)
           if (!info || !info.path) {
             context.ui.notice('无法从选中文本解析出图片路径', 'err', 2600)
             return
@@ -312,6 +523,7 @@ export async function activate(context) {
 
           const filePath = ctx.filePath || (typeof context.getCurrentFilePath === 'function' && context.getCurrentFilePath()) || null
           const absPath = resolveImageAbsolutePath(info.path, filePath)
+          debugLog('contextMenu.uploadSelected: absPath =', absPath, 'filePath =', filePath)
           const url = await uploadViaPicList(context, absPath)
 
           const replacement = buildReplacementMarkdown(info, url)

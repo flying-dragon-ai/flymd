@@ -374,6 +374,99 @@ async fn http_xmlrpc_post(req: XmlHttpReq) -> Result<String, String> {
   Ok(text)
 }
 
+// PicList HTTP 代理：在后端通过 reqwest 调用本地 PicList 内置服务器，避免前端 HTTP scope 限制
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PicListUploadReq {
+  host: String,
+  #[serde(default)]
+  key: String,
+  #[serde(default)]
+  picbed: String,
+  #[serde(default)]
+  config_name: String,
+  path: String,
+}
+
+#[tauri::command]
+async fn flymd_piclist_upload(req: PicListUploadReq) -> Result<String, String> {
+  use serde_json::Value;
+  use url::form_urlencoded;
+
+  fn enc_q(s: &str) -> String {
+    form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>()
+  }
+
+  let mut host = req.host.trim().to_string();
+  if host.is_empty() {
+    return Err("PicList host 为空".into());
+  }
+  if !host.starts_with("http://") && !host.starts_with("https://") {
+    host = format!("http://{}", host);
+  }
+  let mut url = format!("{}/upload", host.trim_end_matches('/'));
+
+  let mut qs: Vec<String> = Vec::new();
+  if !req.key.trim().is_empty() {
+    qs.push(format!("key={}", enc_q(req.key.trim())));
+  }
+  if !req.picbed.trim().is_empty() {
+    qs.push(format!("picbed={}", enc_q(req.picbed.trim())));
+  }
+  if !req.config_name.trim().is_empty() {
+    qs.push(format!("configName={}", enc_q(req.config_name.trim())));
+  }
+  if !qs.is_empty() {
+    url.push('?');
+    url.push_str(&qs.join("&"));
+  }
+
+  let payload = serde_json::json!({
+    "list": [req.path]
+  });
+
+  let client = reqwest::Client::builder()
+    .timeout(Duration::from_secs(30))
+    .build()
+    .map_err(|e| format!("build client error: {e}"))?;
+
+  let res = client
+    .post(&url)
+    .json(&payload)
+    .send()
+    .await
+    .map_err(|e| format!("send error: {e}"))?;
+
+  let status = res.status();
+  let v: Value = res.json().await.map_err(|e| format!("json error: {e}"))?;
+
+  if !status.is_success() {
+    return Err(format!("HTTP {}: {}", status.as_u16(), v));
+  }
+
+  let ok = v
+    .get("success")
+    .and_then(|x| x.as_bool())
+    .unwrap_or(false);
+  if !ok {
+    return Err(format!("PicList 返回失败: {}", v));
+  }
+
+  let url_field = v
+    .get("result")
+    .and_then(|r| {
+      if r.is_array() {
+        r.get(0)
+      } else {
+        Some(r)
+      }
+    })
+    .and_then(|x| x.as_str())
+    .ok_or_else(|| format!("PicList 响应缺少 result 字段: {}", v))?;
+
+  Ok(url_field.to_string())
+}
+
 // 为插件提供的“全库 Markdown 扫描”命令：在给定根目录下递归枚举所有 md/markdown/txt 文件
 #[tauri::command]
 async fn flymd_list_markdown_files(root: String) -> Result<Vec<String>, String> {
@@ -440,6 +533,7 @@ fn main() {
       write_text_file_any,
       get_pending_open_path,
       http_xmlrpc_post,
+      flymd_piclist_upload,
       flymd_list_markdown_files,
       check_update,
       download_file,

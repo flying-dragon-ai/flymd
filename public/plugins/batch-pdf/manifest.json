@@ -4,7 +4,12 @@
   "version": "0.1.0",
   "author": "flyMD",
   "description": "一次选择多个文档并批量导出为 PDF",
+  "i18n": {
+    "en": {
+      "name": "Batch Export PDF",
+      "description": "Select multiple documents and export them to PDF in batch."
+    }
+  },
   "homepage": "https://github.com/flyhunterl/flymd",
   "main": "main.js"
 }
-

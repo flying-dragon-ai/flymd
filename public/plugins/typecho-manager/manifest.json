@@ -4,6 +4,11 @@
   "version": "0.1.1",
   "author": "flyMD",
   "description": "通过 XML-RPC 从 Typecho 拉取博文并保存为本地 Markdown，支持按时间 / 分类筛选和按需下载。",
+  "i18n": {
+    "en": {
+      "name": "Typecho Post Manager",
+      "description": "Fetch posts from Typecho via XML-RPC and save them as local Markdown, with filtering by date/category and selective download."
+    }
+  },
   "main": "main.js"
 }
-

@@ -4,9 +4,14 @@
   "version": "0.1.3",
   "author": "flyMD user",
   "description": "提供双向链接/反向链接侧边面板。（暂不支持所见模式）",
+  "i18n": {
+    "en": {
+      "name": "Backlinks",
+      "description": "Provides a bidirectional/backlinks side panel (WYSIWYG mode not supported yet)."
+    }
+  },
   "main": "main.js",
   "minHostVersion": "0.3.0",
   "homepage": "https://github.com/your-name/flymd-backlinks",
   "repository": "https://github.com/your-name/flymd-backlinks"
 }
-

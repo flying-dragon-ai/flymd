@@ -4,6 +4,12 @@
   "version": "0.3.0",
   "author": "flyMD",
   "description": "多供应商 AI 写作助手",
+  "i18n": {
+    "en": {
+      "name": "AI Assistant",
+      "description": "Multi-provider AI writing assistant"
+    }
+  },
   "homepage": "https://github.com/flyhunterl/flymd",
   "main": "main.js",
   "assets": [

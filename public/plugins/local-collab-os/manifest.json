@@ -4,6 +4,11 @@
   "version": "0.1.8",
   "author": "flyMD",
   "description": "连接协同服务器的简单多人协同插件",
+  "i18n": {
+    "en": {
+      "name": "Local Collaboration",
+      "description": "Simple multi-user collaboration plugin that connects to a collaboration server."
+    }
+  },
   "main": "main.js"
 }
-

@@ -4,6 +4,12 @@
   "version": "0.1.4",
   "author": "flyMD",
   "description": "使用大模型高精度识别解析 PDF 和图片为 Markdown 或 Docx并翻译。支持识别手写、布局还原（仅 MD）、公式识别、表格识别",
+  "i18n": {
+    "en": {
+      "name": "High-Accuracy PDF & Image Parsing",
+      "description": "Use large models to accurately parse PDF and images into Markdown or Docx with translation, including handwriting, layout reconstruction, formulas and tables."
+    }
+  },
   "main": "main.js",
   "minHostVersion": "0.3.5"
 }

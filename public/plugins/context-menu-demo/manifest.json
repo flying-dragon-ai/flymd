@@ -4,5 +4,11 @@
   "version": "1.0.0",
   "author": "flyMD Team",
   "description": "演示右键菜单 API 的使用，包括文本转换、格式化等功能",
+  "i18n": {
+    "en": {
+      "name": "Context Menu Demo",
+      "description": "Demonstrates the context menu API, including text transforms and formatting utilities."
+    }
+  },
   "main": "main.js"
 }

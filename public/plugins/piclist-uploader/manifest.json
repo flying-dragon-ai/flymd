@@ -4,7 +4,12 @@
   "version": "0.1.0",
   "author": "flyMD",
   "description": "通过 PicList 上传本地图片/也可右键上传指定图片",
+  "i18n": {
+    "en": {
+      "name": "PicList Uploader",
+      "description": "Upload local images via PicList, or upload specific images from the context menu."
+    }
+  },
   "main": "main.js",
   "homepage": "https://github.com/Kuingsmile/PicList"
 }
-

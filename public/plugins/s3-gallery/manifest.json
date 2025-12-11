@@ -4,9 +4,14 @@
   "version": "0.1.0",
   "author": "flyMD",
   "description": "查看并管理通过内置 S3/R2 图床上传的图片，支持复制链接、插入当前文档以及删除远端对象。",
+  "i18n": {
+    "en": {
+      "name": "S3 Image Gallery",
+      "description": "Browse and manage images uploaded via the built-in S3/R2 image host: copy links, insert into documents, and delete remote objects."
+    }
+  },
   "main": "main.js",
   "minHostVersion": "0.3.0",
   "homepage": "https://github.com/flyhunterl/flymd",
   "repository": "https://github.com/flyhunterl/flymd"
 }
-

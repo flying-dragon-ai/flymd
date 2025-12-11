@@ -4,6 +4,12 @@
   "version": "0.1.0",
   "author": "flyMD",
   "description": "显示当前文档的字符数",
+  "i18n": {
+    "en": {
+      "name": "Word Count",
+      "description": "Display character statistics for the current document."
+    }
+  },
   "homepage": "https://github.com/flyhunterl/flymd",
   "main": "main.js"
 }

@@ -2727,6 +2727,10 @@ async function ensureRenderer() {
     } catch (e) {
       console.warn('markdown-it-katex 加载失败：', e)
     }
+
+    // 表格横向滚动支持：为所有表格添加包装器
+    md.renderer.rules.table_open = () => '<div class="table-wrapper">\n<table>\n'
+    md.renderer.rules.table_close = () => '</table>\n</div>\n'
   }
 }
 

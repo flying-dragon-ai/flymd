@@ -582,7 +582,8 @@ body.compact-titlebar .window-btn.window-close:hover {
   right: 0;
   bottom: var(--workspace-bottom-gap, 0px);
   /* 仅显示竖向滚动条，隐藏横向滚动条，避免页面抖动且更清爽 */
-  overflow-y: auto; overflow-x: hidden;
+  overflow-y: auto;
+  overflow-x: auto; /* 允许宽内容横向滚动 */
   padding-top: 16px;
   padding-bottom: 40px;
   padding-left: calc(20px + var(--workspace-left-gap, 0px));
@@ -1663,15 +1664,41 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .preview blockquote p:last-child {
   margin-bottom: 0;
 }
-.preview table {
-  border-collapse: separate;
-  border-spacing: 0;
-  width: 100%;
+/* 表格包装器：处理横向滚动 */
+.preview .table-wrapper {
+  overflow-x: auto;
   margin: 1.5em 0;
   border: 1.5px solid var(--table-border);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
+
+.preview .table-wrapper > table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: auto;        /* 允许表格自然宽度 */
+  min-width: 100%;    /* 窄表格填满容器 */
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* 保持表格内部圆角 */
+.preview .table-wrapper > table tr:first-child th:first-child {
+  border-top-left-radius: 7px;
+}
+.preview .table-wrapper > table tr:first-child th:last-child {
+  border-top-right-radius: 7px;
+}
+.preview .table-wrapper > table tr:last-child td:first-child {
+  border-bottom-left-radius: 7px;
+}
+.preview .table-wrapper > table tr:last-child td:last-child {
+  border-bottom-right-radius: 7px;
+}
+
+/* 单元格样式（保持不变） */
 .preview table th {
   border-right: 1px solid var(--table-border);
   border-bottom: 2px solid var(--table-border);
@@ -1701,6 +1728,47 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 }
 .preview table tbody tr:nth-child(even) {
   background: rgba(127,127,127,0.02);
+}
+
+/* 表格内代码和图片处理 */
+.preview table td code,
+.preview table th code {
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.preview table td img,
+.preview table th img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 滚动条样式优化 */
+.preview .table-wrapper::-webkit-scrollbar {
+  height: 8px;
+  background: transparent;
+}
+.preview .table-wrapper::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.03);
+  border-radius: 4px;
+}
+.preview .table-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.15);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+.preview .table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.25);
+}
+
+/* 暗色主题滚动条 */
+.dark .preview .table-wrapper::-webkit-scrollbar-track {
+  background: rgba(255,255,255,0.05);
+}
+.dark .preview .table-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.2);
+}
+.dark .preview .table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.3);
 }
 
 /* Mermaid 图右上角缩放控件 */
@@ -2562,6 +2630,14 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .container.md-github .preview h2 { border-bottom-color: #e5e7eb; }
 .container.md-github .preview pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; box-shadow: none; }
 .container.md-github .preview :not(pre) > code { background: #f6f8fa; border: 1px solid #d0d7de; color: #24292f; border-radius: 4px; }
+.container.md-github .preview .table-wrapper {
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.container.md-github .preview .table-wrapper > table {
+  border: none;
+}
 .container.md-github .preview table { border-collapse: collapse; }
 .container.md-github .preview table th,
 .container.md-github .preview table td { border: 1px solid #d0d7de; padding: 10px 14px; }
@@ -2580,7 +2656,17 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .container.md-notion .preview table th { background: rgba(127,127,127,0.06); }
 .container.md-notion .preview pre { background: #f7f6f3; border: none; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); --code-pre-pad-y: 16px; }
 .container.md-notion .preview :not(pre) > code { background: #f3f2ef; border: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04); border-radius: 6px; }
-.container.md-notion .preview table { border-collapse: separate; border-spacing: 0; border: 1px solid rgba(0,0,0,0.06); border-radius: 6px; overflow: hidden; }
+.container.md-notion .preview .table-wrapper {
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 6px;
+  box-shadow: none;
+}
+.container.md-notion .preview .table-wrapper > table {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.container.md-notion .preview table { border-collapse: separate; border-spacing: 0; }
 .container.md-notion .preview table th,
 .container.md-notion .preview table td { border-bottom: 1px solid rgba(0,0,0,0.06); border-right: 1px solid rgba(0,0,0,0.06); padding: 10px 14px; }
 .container.md-notion .preview table tr:last-child td { border-bottom: none; }
@@ -2663,7 +2749,16 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .container.md-card .preview h2 { border-bottom-color: rgba(0,0,0,0.06); }
 .container.md-card .preview pre { background: #ffffff; border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.08); --code-pre-pad-y: 18px; }
 .container.md-card .preview :not(pre) > code { background: #f7f7f7; border: 1px solid rgba(0,0,0,0.08); border-radius: 6px; }
-.container.md-card .preview table { border-collapse: separate; border-spacing: 0; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; overflow: hidden; }
+.container.md-card .preview .table-wrapper {
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 10px;
+  box-shadow: none;
+}
+.container.md-card .preview .table-wrapper > table {
+  border: none;
+  border-radius: 0;
+}
+.container.md-card .preview table { border-collapse: separate; border-spacing: 0; }
 .container.md-card .preview th,
 .container.md-card .preview td { border-bottom: 1px solid rgba(0,0,0,0.06); padding: 12px 16px; }
 .container.md-card .preview th { background: #f8fafc; font-weight: 600; }
@@ -2716,7 +2811,13 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .container.md-bear .preview pre { background: #fafafa; border: 1px solid #f0f0f0; border-radius: 8px; box-shadow: none; }
 .container.md-bear .preview :not(pre) > code { background: #fff3e0; border: none; border-radius: 4px; color: #e65100; }
 .container.md-bear .preview blockquote { border-left: 3px solid #e53935; background: rgba(229, 57, 53, 0.04); font-style: italic; }
-.container.md-bear .preview table { border-collapse: collapse; border-radius: 8px; overflow: hidden; }
+.container.md-bear .preview .table-wrapper {
+  border-radius: 8px;
+}
+.container.md-bear .preview .table-wrapper > table {
+  border-radius: 0;
+}
+.container.md-bear .preview table { border-collapse: collapse; }
 .container.md-bear .preview th,
 .container.md-bear .preview td { border: 1px solid #f0f0f0; padding: 10px 14px; }
 .container.md-bear .preview th { background: #fafafa; font-weight: 600; }
@@ -2735,6 +2836,11 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .container.md-minimalist .preview pre { background: transparent; border: none; border-radius: 0; box-shadow: none; border-left: 2px solid #e2e8f0; padding-left: 1.2em; }
 .container.md-minimalist .preview :not(pre) > code { background: transparent; border: none; color: #4a5568; font-weight: 500; }
 .container.md-minimalist .preview blockquote { border-left: 2px solid #e2e8f0; background: transparent; padding: 0.5em 1.2em; color: #718096; font-style: normal; }
+.container.md-minimalist .preview .table-wrapper {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
 .container.md-minimalist .preview table { border: none; border-collapse: collapse; }
 .container.md-minimalist .preview th,
 .container.md-minimalist .preview td { border: none; border-bottom: 1px solid #e2e8f0; padding: 8px 12px; }

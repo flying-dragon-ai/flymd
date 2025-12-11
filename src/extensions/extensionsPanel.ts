@@ -827,6 +827,14 @@ export async function refreshExtensionsUI(): Promise<void> {
   loadingSpinner.remove()
 }
 
+// 确保扩展面板完成一次完整渲染（可用于启动时后台预热）
+async function ensureExtensionsPanelRenderedOnce(): Promise<void> {
+  ensureExtensionsOverlayMounted()
+  if (_extOverlayRenderedOnce) return
+  _extOverlayRenderedOnce = true
+  await refreshExtensionsUI()
+}
+
 // 简单判断一个字符串是否更像本地路径（用于区分本地/远程安装）
 function isLikelyLocalPath(input: string): boolean {
   const v = (input || '').trim()
@@ -912,29 +920,35 @@ function ensureExtensionsOverlayMounted(): void {
   btnBrowseLocal?.addEventListener('click', () => { void browseLocalFolder() })
 }
 
+// 启动后后台预热扩展面板：提前完成市场索引加载与 UI 构建
+export async function prewarmExtensionsPanel(): Promise<void> {
+  try {
+    await ensureExtensionsPanelRenderedOnce()
+  } catch {}
+}
+
 export async function showExtensionsOverlay(show: boolean): Promise<void> {
   ensureExtensionsOverlayMounted()
   if (!_extOverlayEl) return
   if (show) {
     _extOverlayEl.classList.add('show')
     if (!_extOverlayRenderedOnce) {
-      _extOverlayRenderedOnce = true
-      await refreshExtensionsUI()
-    } else {
-      try { await refreshInstalledExtensionsUI() } catch {}
-      const fn = _extApplyMarketFilter
-      if (fn) {
-        void (async () => {
-          try {
-            const items = await loadInstallablePlugins(false)
-            if (!Array.isArray(items) || items.length === 0) return
-            _extLastMarketItems = items
-            await fn(items)
-          } catch {
-            // 静默失败，不打扰用户
-          }
-        })()
-      }
+      await ensureExtensionsPanelRenderedOnce()
+      return
+    }
+    try { await refreshInstalledExtensionsUI() } catch {}
+    const fn = _extApplyMarketFilter
+    if (fn) {
+      void (async () => {
+        try {
+          const items = await loadInstallablePlugins(false)
+          if (!Array.isArray(items) || items.length === 0) return
+          _extLastMarketItems = items
+          await fn(items)
+        } catch {
+          // 静默失败，不打扰用户
+        }
+      })()
     }
   } else {
     _extOverlayEl.classList.remove('show')

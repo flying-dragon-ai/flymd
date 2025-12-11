@@ -122,7 +122,7 @@ import {
 } from './extensions/coreExtensions'
 import { initPluginsMenu, addToPluginsMenu, removeFromPluginsMenu, togglePluginDropdown } from './extensions/pluginMenu'
 import { openLinkDialog, openRenameDialog } from './ui/linkDialogs'
-import { initExtensionsPanel, refreshExtensionsUI as panelRefreshExtensionsUI, showExtensionsOverlay as panelShowExtensionsOverlay } from './extensions/extensionsPanel'
+import { initExtensionsPanel, refreshExtensionsUI as panelRefreshExtensionsUI, showExtensionsOverlay as panelShowExtensionsOverlay, prewarmExtensionsPanel as panelPrewarmExtensionsPanel } from './extensions/extensionsPanel'
 import { initAboutOverlay, showAbout } from './ui/aboutOverlay'
 import { ensureUpdateOverlay, showUpdateOverlayLinux, showUpdateDownloadedOverlay, showInstallFailedOverlay, loadUpdateExtra, renderUpdateDetailsHTML } from './ui/updateOverlay'
 import { openInBrowser, upMsg } from './core/updateUtils'
@@ -8605,6 +8605,14 @@ function bindEvents() {
         await initWebdavSync()
       } catch (e) {
         console.warn('[WebDAV] 延迟初始化失败:', e)
+      }
+    })
+    // 启动后后台预热扩展管理面板：提前完成市场索引加载与 UI 构建
+    ric(async () => {
+      try {
+        await panelPrewarmExtensionsPanel()
+      } catch (e) {
+        console.warn('[ExtensionsPanel] 延迟预热失败:', e)
       }
     })
     // 开启 DevTools 快捷键（生产/开发环境均可）

@@ -53,6 +53,9 @@ let _extInstallInput: HTMLInputElement | null = null
 let _extMarketSearchText = ''
 let _extMarketCategory = ''
 let _extLastMarketItems: InstallableItem[] = []
+// 室内缓存：已安装映射与可更新状态，避免频繁网络请求阻塞 UI
+let _extLastInstalledMap: Record<string, InstalledPlugin> = {}
+let _extLastUpdateMap: Record<string, PluginUpdateState> = {}
 let _extUpdatesOnly = false  // 是否仅显示可更新扩展（已安装区块过滤）
 let _extGlobalOrder: Record<string, number> = {} // 扩展卡片统一排序顺序
 let _extOverlayRenderedOnce = false  // 是否已完成首次渲染
@@ -84,8 +87,11 @@ async function getInstalledPluginsFromStore(): Promise<Record<string, InstalledP
   try {
     if (!host) return {}
     const store = host.getStore()
-    return await loadInstalledPlugins(store)
+    const map = await loadInstalledPlugins(store)
+    _extLastInstalledMap = map || {}
+    return map
   } catch {
+    _extLastInstalledMap = {}
     return {}
   }
 }
@@ -95,6 +101,7 @@ async function setInstalledPluginsToStore(map: Record<string, InstalledPlugin>):
     if (!host) return
     const store = host.getStore()
     await saveInstalledPlugins(store, map)
+    _extLastInstalledMap = map || {}
   } catch {}
 }
 
@@ -160,16 +167,9 @@ export async function refreshInstalledExtensionsUI(): Promise<void> {
     } catch {
       installedMap = {}
     }
+    _extLastInstalledMap = installedMap
 
-    const arr = Object.values(installedMap)
-    let updateMap: Record<string, PluginUpdateState> = {}
-    if (arr.length > 0 && _extLastMarketItems && _extLastMarketItems.length > 0) {
-      try {
-        updateMap = await getPluginUpdateStates(arr, _extLastMarketItems)
-      } catch {
-        updateMap = {}
-      }
-    }
+    const updateMap: Record<string, PluginUpdateState> = _extLastUpdateMap || {}
 
     renderInstalledExtensions(unifiedList, installedMap, updateMap)
   } catch {}
@@ -323,6 +323,7 @@ function renderInstalledExtensions(
           try {
             btnUpdate.textContent = t('ext.update.btn') + '...'; (btnUpdate as HTMLButtonElement).disabled = true
             await updateInstalledPlugin(p, info)
+            try { delete _extLastUpdateMap[p.id] } catch {}
             await refreshInstalledExtensionsUI()
             host.pluginNotice(t('ext.update.ok'), 'ok', 1500)
           } catch (err) {
@@ -815,6 +816,9 @@ export async function refreshExtensionsUI(): Promise<void> {
       updateMap = await getPluginUpdateStates(arr, marketItems)
     } catch { updateMap = {} }
   }
+
+  _extLastInstalledMap = installedMap
+  _extLastUpdateMap = updateMap
 
   renderInstalledExtensions(unifiedList, installedMap, updateMap)
 

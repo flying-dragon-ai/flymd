@@ -2,6 +2,29 @@
 // Word / Excel 导入工具插件
 // 所有中文注释，符合项目约定
 
+// 轻量多语言：跟随宿主（flymd.locale），默认用系统语言
+const OI_LOCALE_LS_KEY = 'flymd.locale'
+function oiDetectLocale() {
+  try {
+    const nav = typeof navigator !== 'undefined' ? navigator : null
+    const lang = (nav && (nav.language || nav.userLanguage)) || 'en'
+    const lower = String(lang || '').toLowerCase()
+    if (lower.startsWith('zh')) return 'zh'
+  } catch {}
+  return 'en'
+}
+function oiGetLocale() {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null
+    const v = ls && ls.getItem(OI_LOCALE_LS_KEY)
+    if (v === 'zh' || v === 'en') return v
+  } catch {}
+  return oiDetectLocale()
+}
+function oiText(zh, en) {
+  return oiGetLocale() === 'en' ? en : zh
+}
+
 // 简单工具函数：弹出文件选择对话框
 function pickOfficeFile() {
   return new Promise((resolve, reject) => {
@@ -13,7 +36,7 @@ function pickOfficeFile() {
     input.onchange = () => {
       const file = input.files && input.files[0]
       if (!file) {
-        reject(new Error('未选择文件'))
+        reject(new Error(oiText('未选择文件', 'No file selected')))
       } else {
         resolve(file)
       }
@@ -24,7 +47,7 @@ function pickOfficeFile() {
       document.body.appendChild(input)
     } catch (e) {
       // 在极端情况下可能没有 document.body，直接失败
-      reject(new Error('当前环境不支持文件选择'))
+      reject(new Error(oiText('当前环境不支持文件选择', 'Current environment does not support file selection')))
       return
     }
 
@@ -50,17 +73,17 @@ function ensureMammothLoaded(context) {
         if (window.mammoth && window.mammoth.convertToHtml) {
           resolve(window.mammoth)
         } else {
-          reject(new Error('mammoth 加载完成但不可用'))
+          reject(new Error(oiText('mammoth 加载完成但不可用', 'mammoth loaded but is not usable')))
         }
       }
-      script.onerror = () => reject(new Error('无法加载 mammoth 库，请检查网络或更换镜像地址'))
+      script.onerror = () => reject(new Error(oiText('无法加载 mammoth 库，请检查网络或更换镜像地址', 'Failed to load mammoth library. Please check network or use another mirror.')))
       document.head.appendChild(script)
     } catch (e) {
       reject(e)
     }
   }).catch((e) => {
     mammothPromise = null
-    context.ui.notice(e.message || 'mammoth 加载失败', 'err', 5000)
+    context.ui.notice(e.message || oiText('mammoth 加载失败', 'Failed to load mammoth'), 'err', 5000)
     throw e
   })
 
@@ -84,17 +107,17 @@ function ensureXlsxLoaded(context) {
         if (window.XLSX && window.XLSX.read && window.XLSX.utils) {
           resolve(window.XLSX)
         } else {
-          reject(new Error('XLSX 加载完成但不可用'))
+          reject(new Error(oiText('XLSX 加载完成但不可用', 'XLSX loaded but is not usable')))
         }
       }
-      script.onerror = () => reject(new Error('无法加载 XLSX 库，请检查网络或更换镜像地址'))
+      script.onerror = () => reject(new Error(oiText('无法加载 XLSX 库，请检查网络或更换镜像地址', 'Failed to load XLSX library. Please check network or use another mirror.')))
       document.head.appendChild(script)
     } catch (e) {
       reject(e)
     }
   }).catch((e) => {
     xlsxPromise = null
-    context.ui.notice(e.message || 'XLSX 加载失败', 'err', 5000)
+    context.ui.notice(e.message || oiText('XLSX 加载失败', 'Failed to load XLSX'), 'err', 5000)
     throw e
   })
 
@@ -120,7 +143,7 @@ function workbookToMarkdown(workbook) {
 
     if (!rows.length) return
 
-    parts.push(`# 工作表 ${index + 1}: ${name}`)
+    parts.push(`# ${oiText('工作表', 'Sheet')} ${index + 1}: ${name}`)
     parts.push('')
 
     // 计算列数
@@ -132,7 +155,11 @@ function workbookToMarkdown(workbook) {
 
     // 填充行列，转为 Markdown 表格
     const header = rows[0]
-    const headerLine = '|' + header.map((cell, i) => String(cell ?? '').trim() || `列${i + 1}`).join('|') + '|'
+    const headerLine = '|' + header.map((cell, i) => {
+      const v = String(cell ?? '').trim()
+      if (v) return v
+      return oiText(`列${i + 1}`, `Col ${i + 1}`)
+    }).join('|') + '|'
     const alignLine = '|' + new Array(maxCols).fill('---').join('|') + '|' // 全部左对齐
 
     parts.push(headerLine)
@@ -152,7 +179,13 @@ function workbookToMarkdown(workbook) {
   })
 
   if (!parts.length) {
-    return '> 未在 Excel 中解析到任何有效数据。'
+    return (
+      '> ' +
+      oiText(
+        '未在 Excel 中解析到任何有效数据。',
+        'No valid data parsed from Excel.',
+      )
+    )
   }
 
   return parts.join('\n')
@@ -162,19 +195,30 @@ function workbookToMarkdown(workbook) {
 export function activate(context) {
   // 添加一个主菜单项，下面挂子菜单，避免菜单拥挤
   context.addMenuItem({
-    label: '导入 Word/Excel',
-    title: '从本地 docx/xlsx 文件转换为 Markdown 并导入',
+    label: oiText('导入 Word/Excel', 'Import Word/Excel'),
+    title: oiText(
+      '从本地 docx/xlsx 文件转换为 Markdown 并导入',
+      'Convert local docx/xlsx files to Markdown and import',
+    ),
     onClick: async () => {
       let file
       try {
         file = await pickOfficeFile()
       } catch (e) {
-        context.ui.notice(e.message || '选择文件失败', 'err', 3000)
+        context.ui.notice(
+          e.message || oiText('选择文件失败', 'Failed to pick file'),
+          'err',
+          3000,
+        )
         return
       }
 
       if (!file) {
-        context.ui.notice('未选择任何文件', 'err', 3000)
+        context.ui.notice(
+          oiText('未选择任何文件', 'No file selected'),
+          'err',
+          3000,
+        )
         return
       }
 
@@ -184,12 +228,18 @@ export function activate(context) {
       let loadingId = null
       try {
         if (context.ui.showNotification) {
-          loadingId = context.ui.showNotification('正在解析 ' + name + ' ...', {
-            type: 'info',
-            duration: 0
-          })
+          loadingId = context.ui.showNotification(
+            oiText('正在解析 ', 'Parsing ') + name + ' ...',
+            {
+              type: 'info',
+              duration: 0
+            })
         } else {
-          context.ui.notice('正在解析 ' + name + ' ...', 'ok', 2000)
+          context.ui.notice(
+            oiText('正在解析 ', 'Parsing ') + name + ' ...',
+            'ok',
+            2000,
+          )
         }
 
         const arrayBuffer = await file.arrayBuffer()
@@ -204,7 +254,11 @@ export function activate(context) {
           const result = await window.mammoth.convertToHtml({ arrayBuffer })
           const html = result && result.value ? result.value : ''
           if (!html) {
-            context.ui.notice('未从 Word 文件中解析到内容', 'err', 4000)
+            context.ui.notice(
+              oiText('未从 Word 文件中解析到内容', 'No content parsed from Word file'),
+              'err',
+              4000,
+            )
             return
           }
 
@@ -217,12 +271,20 @@ export function activate(context) {
           const workbook = window.XLSX.read(arrayBuffer, { type: 'array' })
           md = workbookToMarkdown(workbook)
         } else {
-          context.ui.notice('仅支持 .docx / .xlsx / .xls 文件', 'err', 4000)
+          context.ui.notice(
+            oiText('仅支持 .docx / .xlsx / .xls 文件', 'Only .docx / .xlsx / .xls files are supported'),
+            'err',
+            4000,
+          )
           return
         }
 
         if (!md || !md.trim()) {
-          context.ui.notice('转换结果为空，未导入内容', 'err', 4000)
+          context.ui.notice(
+            oiText('转换结果为空，未导入内容', 'Converted result is empty, nothing imported'),
+            'err',
+            4000,
+          )
           return
         }
 
@@ -232,10 +294,19 @@ export function activate(context) {
         const finalMd = prefix + md
 
         context.setEditorValue(finalMd)
-        context.ui.notice('已成功导入：' + name, 'ok', 4000)
+        context.ui.notice(
+          oiText('已成功导入：', 'Imported successfully: ') + name,
+          'ok',
+          4000,
+        )
       } catch (e) {
         console.error('[office-importer] 解析失败', e)
-        context.ui.notice('解析失败：' + (e && e.message ? e.message : String(e)), 'err', 5000)
+        context.ui.notice(
+          oiText('解析失败：', 'Parse failed: ') +
+            (e && e.message ? e.message : String(e)),
+          'err',
+          5000,
+        )
       } finally {
         if (loadingId && context.ui.hideNotification) {
           try {
@@ -271,7 +342,7 @@ function dataUrlToBytes(dataUrl, baseName, index) {
   const raw = String(dataUrl || '').trim()
   const m = raw.match(/^data:([^;,]+)?((?:;[^,]+)*)?,([\s\S]*)$/i)
   if (!m) {
-    throw new Error('无效的 data URL')
+    throw new Error(oiText('无效的 data URL', 'Invalid data URL'))
   }
   const mime = m[1] || 'application/octet-stream'
   const params = m[2] || ''
@@ -287,7 +358,9 @@ function dataUrlToBytes(dataUrl, baseName, index) {
     } else if (typeof Buffer !== 'undefined') {
       bin = Buffer.from(clean, 'base64').toString('binary')
     } else {
-      throw new Error('当前环境不支持 base64 解码')
+      throw new Error(
+        oiText('当前环境不支持 base64 解码', 'Base64 decoding not supported in this environment'),
+      )
     }
     const arr = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) {
@@ -498,6 +571,6 @@ async function simpleHtmlToMarkdown(html, fileName, context) {
   text = text.replace(/\n{3,}/g, '\n\n').trim()
 
   // 在开头加一行来源说明，方便用户知道这是导入结果
-  const header = `> 本文档由 Word 文件导入：${fileName || ''}`.trim()
+  const header = `> ${oiText('本文档由 Word 文件导入：', 'Document imported from Word file: ')}${fileName || ''}`.trim()
   return header + '\n\n' + text + '\n'
 }

@@ -4,6 +4,29 @@
 // 2. 不依赖元数据：文件名/正文标题即可参与链接
 // 3. 先实现“可用”的反向链接列表，性能优化以后再说
 
+// 轻量多语言：跟随宿主（flymd.locale），默认用系统语言
+const BACKLINKS_LOCALE_LS_KEY = 'flymd.locale'
+function backlinksDetectLocale() {
+  try {
+    const nav = typeof navigator !== 'undefined' ? navigator : null
+    const lang = (nav && (nav.language || nav.userLanguage)) || 'en'
+    const lower = String(lang || '').toLowerCase()
+    if (lower.startsWith('zh')) return 'zh'
+  } catch {}
+  return 'en'
+}
+function backlinksGetLocale() {
+  try {
+    const ls = typeof localStorage !== 'undefined' ? localStorage : null
+    const v = ls && ls.getItem(BACKLINKS_LOCALE_LS_KEY)
+    if (v === 'zh' || v === 'en') return v
+  } catch {}
+  return backlinksDetectLocale()
+}
+function backlinksText(zh, en) {
+  return backlinksGetLocale() === 'en' ? en : zh
+}
+
 // 内部状态：全部放内存里，必要时用 storage 做简单缓存
 let indexState = {
   // 文档基本信息：key 为绝对路径
@@ -421,22 +444,43 @@ function openWikiLinkTarget(context, coreName) {
   try {
     if (!coreName) return
     if (!indexState.docs || !indexState.docs.size) {
-      context.ui.notice('索引为空，请先重建双向链接索引', 'err', 2000)
+      context.ui.notice(
+        backlinksText(
+          '索引为空，请先重建双向链接索引',
+          'Index is empty, please rebuild backlinks index first',
+        ),
+        'err',
+        2000,
+      )
       return
     }
     const targetNorm = resolveLinkTarget(coreName, indexState.docs)
     if (!targetNorm) {
-      context.ui.notice('未找到链接目标：' + coreName, 'err', 2000)
+      context.ui.notice(
+        backlinksText('未找到链接目标：', 'Link target not found: ') + coreName,
+        'err',
+        2000,
+      )
       return
     }
     const info = indexState.docs.get(targetNorm)
     const realPath = info && info.path
     if (!realPath) {
-      context.ui.notice('链接目标路径无效：' + coreName, 'err', 2000)
+      context.ui.notice(
+        backlinksText('链接目标路径无效：', 'Invalid link target path: ') +
+          coreName,
+        'err',
+        2000,
+      )
       return
     }
     context.openFileByPath(realPath).catch(() => {
-      context.ui.notice('打开文档失败：' + coreName, 'err', 2000)
+      context.ui.notice(
+        backlinksText('打开文档失败：', 'Failed to open document: ') +
+          coreName,
+        'err',
+        2000,
+      )
     })
   } catch (e) {
     console.error('[backlinks] 打开 wiki 链接失败', e)
@@ -689,7 +733,10 @@ async function rebuildIndex(context) {
   } catch (e) {
     // 如果后端命令未实现，退化为让用户手动选择需要索引的文件
     context.ui.showNotification(
-      '未找到全库扫描命令，请手动选择需要索引的文档',
+      backlinksText(
+        '未找到全库扫描命令，请手动选择需要索引的文档',
+        'Full-library scan command not found, please manually select documents to index',
+      ),
       { type: 'info', duration: 5000 },
     )
     try {
@@ -697,12 +744,19 @@ async function rebuildIndex(context) {
       if (picked && Array.isArray(picked) && picked.length > 0) {
         files = picked
         context.ui.notice(
-          '已选择 ' + picked.length + ' 个文档用于建立链接索引',
+          backlinksText(
+            '已选择 ' + picked.length + ' 个文档用于建立链接索引',
+            'Selected ' + picked.length + ' documents to build link index',
+          ),
           'ok',
           2500,
         )
       } else {
-        context.ui.notice('未选择任何文档，索引为空', 'err', 2500)
+        context.ui.notice(
+          backlinksText('未选择任何文档，索引为空', 'No document selected, index is empty'),
+          'err',
+          2500,
+        )
         return
       }
     } catch {
@@ -710,12 +764,18 @@ async function rebuildIndex(context) {
       if (cur) {
         files = [cur]
         context.ui.showNotification(
-          '回退为仅对当前文件建立索引（无法自动扫描库）',
+          backlinksText(
+            '回退为仅对当前文件建立索引（无法自动扫描库）',
+            'Falling back to index only the current file (cannot scan the whole library)',
+          ),
           { type: 'info', duration: 5000 },
         )
       } else {
         context.ui.showNotification(
-          '无法获得文档列表，且当前文件未保存，索引失败',
+          backlinksText(
+            '无法获得文档列表，且当前文件未保存，索引失败',
+            'Cannot obtain document list and current file is unsaved, indexing failed',
+          ),
           { type: 'error', duration: 4000 },
         )
         return
@@ -849,10 +909,13 @@ async function rebuildIndex(context) {
   indexState.vaultRoot = root
 
   await saveIndexToStorage(context)
-  context.ui.showNotification('双向链接索引已重建', {
+  context.ui.showNotification(
+    backlinksText('双向链接索引已重建', 'Backlinks index rebuilt'),
+    {
     type: 'success',
     duration: 2500,
-  })
+    },
+  )
 }
 
 // 使用 AI（Qwen 免费模型）为无法解析的 [[Name]] 链接做兜底匹配
@@ -1412,7 +1475,7 @@ function renderBacklinksPanel(context, panelRoot) {
   header.style.margin = '4px 6px'
 
   const titleEl = document.createElement('span')
-  titleEl.textContent = '反向链接'
+  titleEl.textContent = backlinksText('反向链接', 'Backlinks')
   header.appendChild(titleEl)
 
   // 右侧操作区：重建索引 + 关闭按钮
@@ -1422,8 +1485,11 @@ function renderBacklinksPanel(context, panelRoot) {
   actionsWrap.style.gap = '4px'
 
   const rebuildBtn = document.createElement('button')
-  rebuildBtn.textContent = '重建索引'
-  rebuildBtn.title = '扫描库内所有 Markdown，重新计算双向链接'
+  rebuildBtn.textContent = backlinksText('重建索引', 'Rebuild index')
+  rebuildBtn.title = backlinksText(
+    '扫描库内所有 Markdown，重新计算双向链接',
+    'Scan all Markdown files in the library and rebuild backlinks',
+  )
   rebuildBtn.style.border = '1px solid rgba(0,0,0,0.18)'
   rebuildBtn.style.background = 'transparent'
   rebuildBtn.style.cursor = 'pointer'
@@ -1433,22 +1499,29 @@ function renderBacklinksPanel(context, panelRoot) {
   rebuildBtn.onclick = async () => {
     try {
       rebuildBtn.disabled = true
-      rebuildBtn.textContent = '重建中…'
+      rebuildBtn.textContent = backlinksText('重建中…', 'Rebuilding…')
       await rebuildIndex(context)
       renderBacklinksPanel(context, panelRoot)
     } catch (e) {
       console.error('[backlinks] 面板内重建索引失败', e)
-      context.ui.notice('重建双向链接索引失败', 'err', 2500)
+      context.ui.notice(
+        backlinksText(
+          '重建双向链接索引失败',
+          'Failed to rebuild backlinks index',
+        ),
+        'err',
+        2500,
+      )
     } finally {
       rebuildBtn.disabled = false
-      rebuildBtn.textContent = '重建索引'
+      rebuildBtn.textContent = backlinksText('重建索引', 'Rebuild index')
     }
   }
   actionsWrap.appendChild(rebuildBtn)
 
   const closeBtn = document.createElement('button')
   closeBtn.textContent = '×'
-  closeBtn.title = '关闭反向链接面板'
+  closeBtn.title = backlinksText('关闭反向链接面板', 'Close backlinks panel')
   closeBtn.style.border = 'none'
   closeBtn.style.background = 'transparent'
   closeBtn.style.cursor = 'pointer'
@@ -1483,10 +1556,14 @@ function renderBacklinksPanel(context, panelRoot) {
   sub.style.color = '#888'
   sub.style.margin = '0 6px 4px'
   if (!indexState.builtAt) {
-    sub.textContent = '尚未建立索引，请在“插件/双向链接”中手动重建索引'
+    sub.textContent = backlinksText(
+      '尚未建立索引，请在“插件/双向链接”中手动重建索引',
+      'Index not built yet, please rebuild it via "Plugins / Backlinks" menu',
+    )
   } else {
     const d = new Date(indexState.builtAt)
-    sub.textContent = '索引时间：' + d.toLocaleString()
+    sub.textContent =
+      backlinksText('索引时间：', 'Index time: ') + d.toLocaleString()
   }
   container.appendChild(sub)
 
@@ -1502,7 +1579,10 @@ function renderBacklinksPanel(context, panelRoot) {
     const empty = document.createElement('div')
     empty.style.color = '#999'
     empty.style.padding = '4px 0'
-    empty.textContent = '没有文档链接到当前笔记'
+    empty.textContent = backlinksText(
+      '没有文档链接到当前笔记',
+      'No document links to the current note',
+    )
     listWrap.appendChild(empty)
   } else {
     for (const item of items) {
@@ -1526,7 +1606,11 @@ function renderBacklinksPanel(context, panelRoot) {
 
       row.addEventListener('click', () => {
         context.openFileByPath(item.path).catch(() => {
-          context.ui.notice('打开文档失败：' + item.title, 'err')
+          context.ui.notice(
+            backlinksText('打开文档失败：', 'Failed to open document: ') +
+              item.title,
+            'err',
+          )
         })
       })
 
@@ -1614,28 +1698,47 @@ function renderAiRelatedSection(context, root) {
         if (!label) return
         try {
           context.insertAtCursor(`[[${label}]]`)
-          context.ui.notice('已插入链接：[[ ' + label + ' ]]', 'ok', 1600)
+          context.ui.notice(
+            backlinksText('已插入链接：[[ ', 'Inserted link: [[ ') +
+              label +
+              ' ]]',
+            'ok',
+            1600,
+          )
         } catch (e) {
           console.error('[backlinks] 插入链接失败', e)
-          context.ui.notice('插入链接失败，请切换到编辑模式重试', 'err', 2000)
+          context.ui.notice(
+            backlinksText(
+              '插入链接失败，请切换到编辑模式重试',
+              'Failed to insert link, please switch to edit mode and retry',
+            ),
+            'err',
+            2000,
+          )
         }
       })
       body.appendChild(row)
     }
   } else {
-    body.textContent = '点击“分析”使用 Qwen 为当前文档推荐相关笔记'
+    body.textContent = backlinksText(
+      '点击“分析”使用 Qwen 为当前文档推荐相关笔记',
+      'Click "Analyze" to use Qwen to recommend related notes for the current document',
+    )
   }
 
-  if (norm) {
-    btn.onclick = async () => {
-      try {
-        btn.disabled = true
-        btn.textContent = '分析中...'
-        body.textContent = 'AI 正在分析当前文档与其它笔记的关系...'
-        await loadAiRelatedDocs(context, norm)
-      } finally {
-        btn.disabled = false
-        btn.textContent = '重新分析'
+    if (norm) {
+      btn.onclick = async () => {
+        try {
+          btn.disabled = true
+          btn.textContent = backlinksText('分析中...', 'Analyzing...')
+          body.textContent = backlinksText(
+            'AI 正在分析当前文档与其它笔记的关系...',
+            'AI is analyzing relationships between the current document and other notes...',
+          )
+          await loadAiRelatedDocs(context, norm)
+        } finally {
+          btn.disabled = false
+          btn.textContent = backlinksText('重新分析', 'Analyze again')
         // 重新渲染一次，展示最新结果
         renderAiRelatedSection(context, root)
       }
@@ -1648,11 +1751,25 @@ async function loadAiRelatedDocs(context, currentNorm) {
   try {
     const ai = await getAiApi(context)
     if (!ai) {
-      context.ui.notice('AI 助手未启用或未配置，无法推荐关联文档', 'err', 3000)
+      context.ui.notice(
+        backlinksText(
+          'AI 助手未启用或未配置，无法推荐关联文档',
+          'AI Assistant not enabled or configured, unable to recommend related documents',
+        ),
+        'err',
+        3000,
+      )
       return
     }
     if (!indexState || !indexState.docs || !indexState.docs.size) {
-      context.ui.notice('索引为空，请先重建双向链接索引', 'err', 2500)
+      context.ui.notice(
+        backlinksText(
+          '索引为空，请先重建双向链接索引',
+          'Index is empty, please rebuild backlinks index first',
+        ),
+        'err',
+        2500,
+      )
       return
     }
 
@@ -1668,7 +1785,14 @@ async function loadAiRelatedDocs(context, currentNorm) {
       })
     }
     if (!candidates.length) {
-      context.ui.notice('没有可用于推荐的其它文档', 'err', 2500)
+      context.ui.notice(
+        backlinksText(
+          '没有可用于推荐的其它文档',
+          'No other documents available for recommendation',
+        ),
+        'err',
+        2500,
+      )
       return
     }
 
@@ -1682,30 +1806,55 @@ async function loadAiRelatedDocs(context, currentNorm) {
     }
 
     const prompt = [
-      '你是一个个人知识库的 AI 助手，需要根据语义相关性推荐关联笔记。',
-      '当前笔记信息如下（JSON 对象）：',
+      backlinksText(
+        '你是一个个人知识库的 AI 助手，需要根据语义相关性推荐关联笔记。',
+        'You are an AI assistant for a personal knowledge base. Recommend related notes based on semantic similarity.',
+      ),
+      backlinksText(
+        '当前笔记信息如下（JSON 对象）：',
+        'Current note information (JSON object):',
+      ),
       JSON.stringify(currentMeta, null, 2),
       '',
-      '下面是同一知识库中的其它候选笔记列表（JSON 数组，每项含 id、name、title）：',
+      backlinksText(
+        '下面是同一知识库中的其它候选笔记列表（JSON 数组，每项含 id、name、title）：',
+        'Below is a list of other candidate notes in the same knowledge base (JSON array, each item with id, name, title):',
+      ),
       JSON.stringify(limited, null, 2),
       '',
-      '请从候选列表中选出最多 5 篇与你认为最相关的笔记，按相关度从高到低排序。',
-      '只在这些候选中选择，不要编造新的 id。',
+      backlinksText(
+        '请从候选列表中选出最多 5 篇与你认为最相关的笔记，按相关度从高到低排序。',
+        'Pick up to 5 notes from the candidate list that you consider most relevant, sorted by relevance descending.',
+      ),
+      backlinksText(
+        '只在这些候选中选择，不要编造新的 id。',
+        'Choose only from these candidates and do not invent new ids.',
+      ),
       '',
-      '请严格返回一个只包含 id 字符串的 JSON 数组，例如：',
+      backlinksText(
+        '请严格返回一个只包含 id 字符串的 JSON 数组，例如：',
+        'Return strictly a JSON array containing only id strings, for example:',
+      ),
       '["id1", "id2"]',
-      '不要输出任何额外文字。',
+      backlinksText('不要输出任何额外文字。', 'Do not output any extra text.'),
     ].join('\n')
 
     let reply = ''
     try {
       reply = await ai.callAI(prompt, {
-        system: '你是中文知识库的关联推荐助手，只输出 JSON 数组。',
+        system: backlinksText(
+          '你是中文知识库的关联推荐助手，只输出 JSON 数组。',
+          'You are a recommendation assistant for a knowledge base. Output JSON array only.',
+        ),
         cfgOverride: { provider: 'free', freeModel: 'qwen' },
       })
     } catch (err) {
       console.error('[backlinks] loadAiRelatedDocs 调用 AI 失败:', err)
-      context.ui.notice('AI 推荐关联文档失败', 'err', 3000)
+      context.ui.notice(
+        backlinksText('AI 推荐关联文档失败', 'AI related document recommendation failed'),
+        'err',
+        3000,
+      )
       return
     }
 
@@ -1724,7 +1873,11 @@ async function loadAiRelatedDocs(context, currentNorm) {
       }
     } catch (e) {
       console.error('[backlinks] 解析 AI 推荐结果失败:', e, reply)
-      context.ui.notice('解析 AI 推荐结果失败', 'err', 3000)
+      context.ui.notice(
+        backlinksText('解析 AI 推荐结果失败', 'Failed to parse AI recommendation result'),
+        'err',
+        3000,
+      )
       return
     }
 
@@ -1782,7 +1935,14 @@ export async function activate(context) {
     _panelRoot = panelRoot
     _panelHandle = panelHandle
   } else {
-    context.ui.notice('未找到工作区容器，双向链接面板无法挂载', 'err', 2500)
+    context.ui.notice(
+      backlinksText(
+        '未找到工作区容器，双向链接面板无法挂载',
+        'Workspace container not found, backlinks panel cannot be mounted',
+      ),
+      'err',
+      2500,
+    )
   }
 
   // 初始渲染
@@ -1843,25 +2003,29 @@ export async function activate(context) {
 
   // 在“插件”菜单中增加入口：重建索引 + 手动刷新当前反向链接
   context.addMenuItem({
-    label: '双向链接',
+    label: backlinksText('双向链接', 'Backlinks'),
     children: [
       {
-        label: '重建双向链接索引',
-        note: '扫描库内所有 Markdown',
+        label: backlinksText('重建双向链接索引', 'Rebuild backlinks index'),
+        note: backlinksText('扫描库内所有 Markdown', 'Scan all Markdown files'),
         onClick: async () => {
           await rebuildIndex(context)
           renderBacklinksPanel(context, panelRoot)
         },
       },
       {
-        label: '刷新当前文档反向链接',
+        label: backlinksText('刷新当前文档反向链接', 'Refresh backlinks for current document'),
         onClick: () => {
           renderBacklinksPanel(context, panelRoot)
-          context.ui.notice('已刷新反向链接列表', 'ok', 1200)
+          context.ui.notice(
+            backlinksText('已刷新反向链接列表', 'Backlinks list refreshed'),
+            'ok',
+            1200,
+          )
         },
       },
       {
-        label: '隐藏/显示反向链接面板',
+        label: backlinksText('隐藏/显示反向链接面板', 'Hide/Show backlinks panel'),
         onClick: () => {
           const visible =
             !panelRoot.style.display || panelRoot.style.display !== 'none'
@@ -1876,7 +2040,7 @@ export async function activate(context) {
   // 编辑器右键菜单：根据选中文本插入 [[双向链接]]
   try {
     context.addContextMenuItem({
-      label: '插入双向链接',
+      label: backlinksText('插入双向链接', 'Insert backlink'),
       icon: '🔗',
       condition: (ctx) => {
         return ctx.mode === 'edit' && !!ctx.selectedText && ctx.selectedText.trim().length > 0
@@ -1889,10 +2053,22 @@ export async function activate(context) {
           if (!label) return
           const wrapped = `[[${label}]]`
           context.replaceRange(sel.start, sel.end, wrapped)
-          context.ui.notice('已插入双向链接：' + wrapped, 'ok', 1600)
+          context.ui.notice(
+            backlinksText('已插入双向链接：', 'Inserted backlink: ') +
+              wrapped,
+            'ok',
+            1600,
+          )
         } catch (e) {
           console.error('[backlinks] 插入双向链接失败', e)
-          context.ui.notice('插入双向链接失败，请在源码模式下重试', 'err', 2000)
+          context.ui.notice(
+            backlinksText(
+              '插入双向链接失败，请在源码模式下重试',
+              'Failed to insert backlink, please retry in source mode',
+            ),
+            'err',
+            2000,
+          )
         }
       },
     })
@@ -1903,7 +2079,7 @@ export async function activate(context) {
   // 编辑区 / 所见模式右键：显示 / 隐藏反向链接面板
   try {
     context.addContextMenuItem({
-      label: '显示/隐藏双向链接面板',
+      label: backlinksText('显示/隐藏双向链接面板', 'Show/Hide backlinks panel'),
       icon: '🧷',
       condition: (ctx) => {
         return ctx.mode === 'edit' || ctx.mode === 'preview' || ctx.mode === 'wysiwyg'

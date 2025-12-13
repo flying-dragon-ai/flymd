@@ -9,10 +9,11 @@ const _startTime = performance.now()
 import './style.css'
 import './mobile.css'  // 移动端样式
 import { initThemeUI, applySavedTheme, updateChromeColorsForMode } from './theme'
-import { t, fmtStatus, getLocalePref, setLocalePref, getLocale } from './i18n'
+import { t, fmtStatus, getLocalePref, setLocalePref, getLocale, tLocale } from './i18n'
 // KaTeX 样式改为按需动态加载（首次检测到公式时再加载）
 // markdown-it 和 DOMPurify 改为按需动态 import，类型仅在编译期引用
 import type MarkdownIt from 'markdown-it'
+import type { LocalePref } from './i18n'
 // WYSIWYG: 锚点插件与锚点同步（用于替换纯比例同步）
 import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2GetSelectedText, wysiwygV2FindNext, wysiwygV2FindPrev, wysiwygV2ReplaceOne as wysiwygV2ReplaceOneSel, wysiwygV2ReplaceAllInDoc, wysiwygV2ReplaceAll } from './wysiwyg/v2/index'
 // Tauri 插件（v2）
@@ -6272,14 +6273,28 @@ function showModeMenu() {
   ])
 }
 
+function changeLocaleWithNotice(pref: LocalePref) {
+  try {
+    const prevLocale = getLocale()
+    setLocalePref(pref)
+    applyI18nUi()
+    const newLocale = getLocale()
+    if (prevLocale === newLocale) return
+    const msgPrev = tLocale(prevLocale, 'lang.restartToApply')
+    const msgNew = tLocale(newLocale, 'lang.restartToApply')
+    NotificationManager.show('extension', msgPrev)
+    NotificationManager.show('extension', msgNew)
+  } catch {}
+}
+
 function showLangMenu() {
   const anchor = document.getElementById('btn-lang') as HTMLDivElement | null
   if (!anchor) return
   const pref = getLocalePref()
   const items: TopMenuItemSpec[] = [
-    { label: `${pref === 'auto' ? '✓ ' : ''}${t('lang.auto')}`, action: () => { setLocalePref('auto'); applyI18nUi() } },
-    { label: `${pref === 'zh' ? '✓ ' : ''}${t('lang.zh')}`, action: () => { setLocalePref('zh'); applyI18nUi() } },
-    { label: `${pref === 'en' ? '✓ ' : ''}${t('lang.en')}`, action: () => { setLocalePref('en'); applyI18nUi() } },
+    { label: `${pref === 'auto' ? '✓ ' : ''}${t('lang.auto')}`, action: () => { changeLocaleWithNotice('auto') } },
+    { label: `${pref === 'zh' ? '✓ ' : ''}${t('lang.zh')}`, action: () => { changeLocaleWithNotice('zh') } },
+    { label: `${pref === 'en' ? '✓ ' : ''}${t('lang.en')}`, action: () => { changeLocaleWithNotice('en') } },
   ]
   showTopMenu(anchor, items)
 }

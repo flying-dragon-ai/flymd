@@ -276,6 +276,7 @@ const dict = {
     'lang.auto': '自动',
     'lang.zh': '中文',
     'lang.en': 'English',
+    'lang.restartToApply': '请重启程序以全部应用新语言',
 
     // 右键菜单
     'ctx.newFile': '在此新建文档',
@@ -659,6 +660,7 @@ const dict = {
     'lang.auto': 'Auto',
     'lang.zh': '中文',
     'lang.en': 'English',
+    'lang.restartToApply': 'Please restart the app to fully apply the new language',
 
     // Context menu
     'ctx.newFile': 'New File Here',
@@ -815,6 +817,17 @@ const dict = {
 
 export function t(key: keyof typeof dict['zh'], params?: Record<string, string | number>): string {
   const locale = getLocale()
+  let s = (dict as any)[locale]?.[key] ?? (dict as any)['zh']?.[key] ?? String(key)
+  if (!params) return s
+  try {
+    for (const [k, v] of Object.entries(params)) {
+      s = s.replaceAll(`{${k}}`, String(v))
+    }
+  } catch {}
+  return s
+}
+
+export function tLocale(locale: Locale, key: keyof typeof dict['zh'], params?: Record<string, string | number>): string {
   let s = (dict as any)[locale]?.[key] ?? (dict as any)['zh']?.[key] ?? String(key)
   if (!params) return s
   try {

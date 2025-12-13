@@ -493,12 +493,12 @@ async function renderMarkdownText(text) {
         continue
       }
 
-      const olMatch = line.match(/^(\d+)\.\s+(.*)$/)
-      const ulMatch = line.match(/^[-+*]\s+(.*)$/)
-      if (olMatch || ulMatch) {
-        flushParagraph()
-        const curType = olMatch ? 'ol' : 'ul'
-        const text = (olMatch || ulMatch)[2] || ''
+        const olMatch = line.match(/^(\d+)\.\s+(.*)$/)
+        const ulMatch = line.match(/^[-+*]\s+(.*)$/)
+        if (olMatch || ulMatch) {
+          flushParagraph()
+          const curType = olMatch ? 'ol' : 'ul'
+          const text = olMatch ? (olMatch[2] || '') : (ulMatch[1] || '')
         if (!listType) {
           listType = curType
           listItems = []

@@ -1275,7 +1275,7 @@ export async function activate(context) {
   })()
 
     context.addMenuItem({
-      label: pdf2docText('📄 PDF / 图片高精度解析', '📄 PDF / Image High-Precision OCR'),
+      label: pdf2docText('PDF / 图片高精度解析', 'PDF / Image High-Precision OCR'),
       title: pdf2docText(
         '解析 PDF 或图片为 Markdown 或 docx（图片仅支持 Markdown）',
         'Parse PDF or images into Markdown or DOCX (images only support Markdown).'

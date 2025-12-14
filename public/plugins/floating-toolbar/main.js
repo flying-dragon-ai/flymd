@@ -202,7 +202,7 @@ export async function activate(context) {
   }
 
   context.addMenuItem({
-    label: ftText('🪄 富文本工具条', '🪄 Floating Toolbar'),
+    label: ftText('富文本工具条', 'Floating Toolbar'),
     children: [
       {
         label: ftText('显示/隐藏工具条', 'Show / Hide toolbar'),

@@ -1860,7 +1860,7 @@ function updateWysiwygLineHighlight() {
     const style = window.getComputedStyle(editor)
     let lh = parseFloat(style.lineHeight || '')
     if (!lh || Number.isNaN(lh)) {
-      const fs = parseFloat(style.fontSize || '14') || 14
+      const fs = parseFloat(style.fontSize || '16') || 16
       lh = fs * 1.6
     }
     const padTop = parseFloat(style.paddingTop || '0') || 0
@@ -1976,7 +1976,7 @@ function updateWysiwygCaretDot() {
     const style = window.getComputedStyle(editor)
     // 行高
     let lh = parseFloat(style.lineHeight || '')
-    if (!lh || Number.isNaN(lh)) { const fs = parseFloat(style.fontSize || '14') || 14; lh = fs * 1.6 }
+    if (!lh || Number.isNaN(lh)) { const fs = parseFloat(style.fontSize || '16') || 16; lh = fs * 1.6 }
     const padTop = parseFloat(style.paddingTop || '0') || 0
     const padLeft = parseFloat(style.paddingLeft || '0') || 0
     // 计算当前行与列
@@ -3083,7 +3083,7 @@ async function renderPreview() {
             const pr = Math.max(0, preview.scrollHeight - preview.clientHeight)
             if (er <= 0 && pr > 0 && editor.selectionStart === editor.selectionEnd) {
               const st = window.getComputedStyle(editor)
-              const fs = parseFloat(st.fontSize || '14') || 14
+              const fs = parseFloat(st.fontSize || '16') || 16
               const v = parseFloat(st.lineHeight || '')
               const lh = (Number.isFinite(v) && v > 0 ? v : fs * 1.6)
               const approx = Math.round(((el.clientHeight || 0) / (lh || 16)) * 0.3)

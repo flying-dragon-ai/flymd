@@ -29,19 +29,18 @@ function saveUiZoom(z: number): void {
 export function applyUiZoom(): void {
   try {
     const scale = getUiZoom()
-    // 编辑器字号基准 14px
+    // 三种视图统一以 16px 为基准
     try {
       const ed = document.getElementById('editor') as HTMLTextAreaElement | null
-      if (ed) ed.style.fontSize = (14 * scale).toFixed(2) + 'px'
+      if (ed) ed.style.fontSize = (16 * scale).toFixed(2) + 'px'
     } catch {}
-    // 预览/WYSIWYG 字号基准 16px
     try {
       const pv = document.getElementById('preview') as HTMLDivElement | null
       if (pv) pv.style.fontSize = (16 * scale).toFixed(2) + 'px'
     } catch {}
     try {
       const pm = document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement | null
-      if (pm) pm.style.fontSize = (16 * scale * 0.9).toFixed(2) + 'px'
+      if (pm) pm.style.fontSize = (16 * scale).toFixed(2) + 'px'
     } catch {}
     // 更新状态栏缩放显示
     try {

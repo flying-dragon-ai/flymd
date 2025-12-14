@@ -578,7 +578,7 @@ body.compact-titlebar .window-btn.window-close:hover {
   overflow-y: auto; /* 确保内容超出时显示滚动条 */
   overflow-x: hidden; /* 隐藏横向滚动条 */
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
-  font-size: 14px; line-height: 1.7; color: var(--fg);
+  font-size: 16px; line-height: 1.7; color: var(--fg);
   background: var(--bg);
   padding: 20px 24px 40px 24px;
   box-sizing: border-box;
@@ -1018,7 +1018,7 @@ body > .block-menu { display: none !important; }
   padding: 14px 16px 40px 16px; /* 与 .editor 一致 */
   /* 使用与编辑器完全一致的等宽字体，保证 ch 宽度一致 */
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
-  font-size: 14px; /* 与 .editor 一致 */
+  font-size: 16px; /* 与 .editor 一致 */
   /* 微调变量（如需细调可在运行时动态注入样式覆盖） */
   --w-nudge-x: 0.5ch;   /* 标题横向整体微调，默认约半个西文字符 */
   --w-head-top: -0.10em;/* 标题纵向上移，缓解“在下方”感受 */

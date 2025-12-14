@@ -448,7 +448,7 @@ export function createPluginHost(
         const style = window.getComputedStyle(ed)
         let lh = parseFloat(style.lineHeight || '')
         if (!lh || Number.isNaN(lh)) {
-          const fs = parseFloat(style.fontSize || '14') || 14
+          const fs = parseFloat(style.fontSize || '16') || 16
           lh = fs * 1.6
         }
         const padTop = parseFloat(style.paddingTop || '0') || 0

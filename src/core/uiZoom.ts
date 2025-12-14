@@ -10,6 +10,12 @@ const UI_ZOOM_MIN = 0.6
 const UI_ZOOM_MAX = 2.0
 const UI_ZOOM_STEP = 0.1
 
+// 内容字号（主题面板滑块控制）
+const CONTENT_FONT_SIZE_KEY = 'flymd:contentFontSize'
+const CONTENT_FONT_SIZE_DEFAULT = 16
+const CONTENT_FONT_SIZE_MIN = 12
+const CONTENT_FONT_SIZE_MAX = 24
+
 // 阅读/所见宽度（Shift + 滚轮）控制
 const PREVIEW_WIDTH_KEY = 'flymd:previewWidth'
 const PREVIEW_WIDTH_DEFAULT = 860
@@ -28,6 +34,24 @@ export function getUiZoom(): number {
   return UI_ZOOM_DEFAULT
 }
 function saveUiZoom(z: number): void { try { localStorage.setItem(UI_ZOOM_KEY, String(z)) } catch {} }
+
+export function getContentFontSize(): number {
+  try {
+    const v = localStorage.getItem(CONTENT_FONT_SIZE_KEY)
+    const n = v ? parseFloat(v) : NaN
+    if (Number.isFinite(n) && n >= CONTENT_FONT_SIZE_MIN && n <= CONTENT_FONT_SIZE_MAX) return Math.round(n)
+  } catch {}
+  return CONTENT_FONT_SIZE_DEFAULT
+}
+function saveContentFontSize(px: number): void { try { localStorage.setItem(CONTENT_FONT_SIZE_KEY, String(px)) } catch {} }
+
+export function setContentFontSize(next: number): void {
+  const px = clamp(Math.round(next), CONTENT_FONT_SIZE_MIN, CONTENT_FONT_SIZE_MAX)
+  saveContentFontSize(px)
+  applyUiZoom()
+}
+
+export function resetContentFontSize(): void { setContentFontSize(CONTENT_FONT_SIZE_DEFAULT) }
 
 export function getPreviewWidth(): number {
   try {
@@ -60,10 +84,10 @@ export function resetPreviewWidth(): void {
 export function applyUiZoom(): void {
   try {
     const scale = getUiZoom()
-    // 三种视图统一以 16px 为基准
-    try { const ed = document.getElementById('editor') as HTMLTextAreaElement | null; if (ed) ed.style.fontSize = (16 * scale).toFixed(2) + 'px' } catch {}
-    try { const pv = document.getElementById('preview') as HTMLDivElement | null; if (pv) pv.style.fontSize = (16 * scale).toFixed(2) + 'px' } catch {}
-    try { const pm = document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement | null; if (pm) pm.style.fontSize = (16 * scale).toFixed(2) + 'px' } catch {}
+    const base = getContentFontSize()
+    try { const ed = document.getElementById('editor') as HTMLTextAreaElement | null; if (ed) ed.style.fontSize = (base * scale).toFixed(2) + 'px' } catch {}
+    try { const pv = document.getElementById('preview') as HTMLDivElement | null; if (pv) pv.style.fontSize = (base * scale).toFixed(2) + 'px' } catch {}
+    try { const pm = document.querySelector('#md-wysiwyg-root .ProseMirror') as HTMLElement | null; if (pm) pm.style.fontSize = (base * scale).toFixed(2) + 'px' } catch {}
     // 更新状态栏缩放显示
     try {
       const label = document.getElementById('zoom-label') as HTMLSpanElement | null

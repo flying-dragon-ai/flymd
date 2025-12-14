@@ -2406,6 +2406,11 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
 }
 
+/* 字体区内的字号滑块：独占一行 */
+.theme-fonts .theme-font-size-row {
+  grid-column: 1 / -1;
+}
+
 .theme-fonts .font-install,
 .theme-fonts .font-reset,
 .theme-fonts .font-manage {

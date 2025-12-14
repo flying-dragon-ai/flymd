@@ -12,6 +12,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { readFile, writeFile, mkdir, exists, remove, BaseDirectory } from '@tauri-apps/plugin-fs'
 import { homeDir, desktopDir, join } from '@tauri-apps/api/path'
 import { t } from './i18n'
+import { getContentFontSize, setContentFontSize } from './core/uiZoom'
 export type MdStyleId = 'standard' | 'github' | 'notion' | 'journal' | 'card' | 'docs' | 'typora' | 'obsidian' | 'bear' | 'minimalist'
 
 export interface ThemePrefs {
@@ -639,6 +640,11 @@ function createPanel(): HTMLDivElement {
         <select id="font-body-select"></select>
         <label for="font-mono-select">${t('theme.font.mono')}</label>
         <select id="font-mono-select"></select>
+        <div class="theme-slider-row theme-font-size-row">
+          <label for="font-size-range">${t('theme.font.size')}</label>
+          <input type="range" id="font-size-range" min="12" max="24" step="1" value="16" />
+          <span class="theme-slider-value" id="font-size-value">16px</span>
+        </div>
       </div>
       <div class="theme-option">
         <label class="theme-checkbox-label">
@@ -778,6 +784,8 @@ export function initThemeUI(): void {
     const resetBtn = panel.querySelector('#font-reset') as HTMLButtonElement | null
     const bodyGlobalToggle = panel.querySelector('#font-body-global-toggle') as HTMLInputElement | null
     const fontsWrap = panel.querySelector('.theme-fonts') as HTMLDivElement | null
+    const fontSizeRange = panel.querySelector('#font-size-range') as HTMLInputElement | null
+    const fontSizeValue = panel.querySelector('#font-size-value') as HTMLSpanElement | null
     const fontListEl = panel.querySelector('#font-list') as HTMLDivElement | null
     // 构造“安装字体”按钮并重组操作区（避免直接改 HTML 模板造成编码问题）
     let installBtn: HTMLButtonElement | null = null
@@ -792,6 +800,24 @@ export function initThemeUI(): void {
       if (resetBtn) actions.appendChild(resetBtn)
       fontsWrap.appendChild(actions)
     }
+
+    // 字号滑块：控制内容（编辑/预览/所见）基准字号
+    try {
+      const syncFontSizeUI = () => {
+        if (!fontSizeRange) return
+        const px = getContentFontSize()
+        fontSizeRange.value = String(px)
+        if (fontSizeValue) fontSizeValue.textContent = `${px}px`
+      }
+      syncFontSizeUI()
+      if (fontSizeRange) {
+        fontSizeRange.addEventListener('input', () => {
+          const n = Number.parseInt(fontSizeRange.value || '16', 10)
+          setContentFontSize(Number.isFinite(n) ? n : 16)
+          syncFontSizeUI()
+        })
+      }
+    } catch {}
 
     // 自定义字体数据库（保存在 localStorage，仅记录元数据，文件存放于 AppLocalData/fonts）
     type CustomFont = { id: string; name: string; rel: string; ext: string; family: string }

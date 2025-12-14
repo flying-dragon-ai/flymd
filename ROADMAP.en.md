@@ -4,7 +4,7 @@
 
 
 ## Update v0.7.9
-- Fixed: When the OS is in dark mode but the user explicitly turns off Night Mode in flyMD, the UI could still render with dark-theme artifacts; now a dedicated light-mode override ensures a clean light appearance under system-dark environments.
+- Fixed: When the OS is in dark mode but the user explicitly turns off Night Mode , the UI could still render with dark-theme artifacts
 
 ## Update v0.7.8
 - Fixed: WebDAV sync scanning no longer skips required hidden paths; `.flymd/library-id.json` and extension-registered extra prefixes (e.g. flymd-RAG `.flymd/rag-index/<libraryId>`) can now be uploaded/synced correctly.

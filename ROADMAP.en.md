@@ -3,6 +3,13 @@
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
 
+## Update v0.8.2
+- Added: Tabs can be reordered via drag & drop
+- Fixed: Deleting a document now destroys its corresponding tab to avoid stale tabs
+- Fixed: Adjusted library sidebar auto-refresh timing to avoid potential UI blocking on Linux
+- Improved: Built-in “AI Assistant” upgraded to v0.3.8: default truncation increased to 128K characters
+- Fixed: Built-in “Floating Rich Text Toolbar” upgraded to v0.1.6: in WYSIWYG mode, after inserting a link the caret can exit the link node correctly
+
 ## Update v0.8.1
 - Added: Resizable split view (drag to adjust the ratio)
 - Added: WYSIWYG supports HTML rendering; optional HTML editing can be enabled in Theme settings (off by default) and will be converted back to Markdown

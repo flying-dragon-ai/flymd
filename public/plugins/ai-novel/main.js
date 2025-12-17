@@ -1193,8 +1193,9 @@ async function rag_get_hits(ctx, cfg, queryText, opts) {
   }
   scored.sort((a, b) => b.s - a.s)
 
-  const topK = Math.max(1, (ragCfg.topK | 0) || 6)
-  const maxChars = Math.max(400, (ragCfg.maxChars | 0) || 2400)
+  const topK = Math.max(1, (o.topK != null ? (o.topK | 0) : ((ragCfg.topK | 0) || 6)))
+  const maxChars = Math.max(400, (o.maxChars != null ? (o.maxChars | 0) : ((ragCfg.maxChars | 0) || 2400)))
+  const hitMaxChars = Math.max(200, (o.hitMaxChars != null ? (o.hitMaxChars | 0) : 1200))
   const hits = []
   let used = 0
   for (let i = 0; i < scored.length && hits.length < topK; i++) {
@@ -1202,7 +1203,7 @@ async function rag_get_hits(ctx, cfg, queryText, opts) {
     const src = safeText(it.source).trim() || 'unknown'
     const txt = safeText(it.text).trim()
     if (!txt) continue
-    const cut = txt.length > 1200 ? (txt.slice(0, 1200) + '…') : txt
+    const cut = txt.length > hitMaxChars ? (txt.slice(0, hitMaxChars) + '…') : txt
     if (used + cut.length > maxChars) break
     used += cut.length
     hits.push({ source: src, text: cut })
@@ -3782,6 +3783,497 @@ async function openMetaUpdateDialog(ctx) {
   }
 }
 
+async function openImportExistingDialog(ctx) {
+  let cfg = await loadCfg(ctx)
+  if (!cfg.token) throw new Error(t('请先登录后端', 'Please login first'))
+  if (!cfg.upstream || !cfg.upstream.baseUrl || !cfg.upstream.model) {
+    throw new Error(t('请先在设置里填写上游 BaseURL 和模型', 'Please set upstream BaseURL and model in Settings first'))
+  }
+  if (!cfg.embedding || !cfg.embedding.baseUrl || !cfg.embedding.model) {
+    throw new Error(t('请先在设置里填写 embedding BaseURL 和模型（用于 RAG）', 'Please set embedding BaseURL and model (for RAG)'))
+  }
+  if (!ctx.getLibraryRoot) throw new Error(t('当前宿主缺少库根目录接口', 'Host missing library root API'))
+  const libRoot = normFsPath(await ctx.getLibraryRoot())
+
+  const { body } = createDialogShell(t('导入现有文稿（初始化资料）', 'Import existing writing (init meta)'))
+
+  const sec = document.createElement('div')
+  sec.className = 'ain-card'
+  sec.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${t('把“已有章节正文”提炼成项目资料（进度/设定/角色/关系/大纲）。先建 RAG 索引，再让 AI 按分文件生成提议，你确认后写入。', 'Extract meta files from existing chapters. Build RAG index first, then ask AI for proposals, write after review.')}</div>`
+
+  const hint = document.createElement('div')
+  hint.className = 'ain-muted'
+  hint.style.marginTop = '6px'
+  hint.textContent = t('提示：现有文稿最好放在“小说根目录/项目名/03_章节/…”。如果你的目录不在小说根目录下，请先改“小说根目录”或移动文件。', 'Tip: put your writing under novelRootDir/projectName/03_章节/. Otherwise adjust novelRootDir or move files.')
+  sec.appendChild(hint)
+
+  function absNovelRoot() {
+    const rootPrefix = normFsPath(cfg.novelRootDir || '小说/').replace(/^\/+/, '')
+    return joinFsPath(libRoot, rootPrefix)
+  }
+
+  async function listProjects() {
+    const root = absNovelRoot()
+    const projects = new Map()
+    if (ctx && typeof ctx.invoke === 'function') {
+      try {
+        const files = await ctx.invoke('flymd_list_markdown_files', { root })
+        const arr = Array.isArray(files) ? files : []
+        for (let i = 0; i < arr.length; i++) {
+          const p = normFsPath(arr[i])
+          const rel = p.startsWith(root) ? p.slice(root.length).replace(/^\/+/, '') : ''
+          const parts = rel.split('/').filter(Boolean)
+          const project = parts.length ? parts[0] : ''
+          if (!project) continue
+          const projectRel = joinFsPath(normFsPath(cfg.novelRootDir || '小说/').replace(/^\/+/, ''), project)
+          const projectAbs = joinFsPath(libRoot, projectRel)
+          projects.set(projectRel, { projectRel, projectAbs, projectName: project })
+        }
+      } catch {}
+    }
+    const fixed = String(cfg.currentProjectRel || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    if (fixed && !projects.has(fixed)) {
+      const name = fixed.split('/').filter(Boolean).slice(-1)[0] || fixed
+      projects.set(fixed, { projectRel: fixed, projectAbs: joinFsPath(libRoot, fixed), projectName: name })
+    }
+    return Array.from(projects.values()).sort((a, b) => a.projectRel.localeCompare(b.projectRel))
+  }
+
+  const rowProj = document.createElement('div')
+  rowProj.style.display = 'grid'
+  rowProj.style.gridTemplateColumns = '80px 1fr'
+  rowProj.style.gap = '8px'
+  rowProj.style.alignItems = 'center'
+  rowProj.style.marginTop = '10px'
+  const labProj = document.createElement('div')
+  labProj.className = 'ain-lab'
+  labProj.textContent = t('项目', 'Project')
+  const sel = document.createElement('select')
+  sel.className = 'ain-in ain-select'
+  rowProj.appendChild(labProj)
+  rowProj.appendChild(sel)
+  sec.appendChild(rowProj)
+
+  const goal = mkTextarea(t('导入目标/要求（可空）', 'Goal / requirements (optional)'), '')
+  goal.ta.style.minHeight = '80px'
+  sec.appendChild(goal.wrap)
+
+  const cons = mkTextarea(t('本次硬约束（可空）', 'Hard constraints (optional)'), '')
+  cons.ta.style.minHeight = '70px'
+  sec.appendChild(cons.wrap)
+
+  const rowStrength = document.createElement('div')
+  rowStrength.style.display = 'grid'
+  rowStrength.style.gridTemplateColumns = '120px 1fr'
+  rowStrength.style.gap = '8px'
+  rowStrength.style.alignItems = 'center'
+  rowStrength.style.marginTop = '10px'
+  const labStrength = document.createElement('div')
+  labStrength.className = 'ain-lab'
+  labStrength.textContent = t('覆盖强度', 'Coverage')
+  const selStrength = document.createElement('select')
+  selStrength.className = 'ain-in ain-select'
+  ;[
+    { v: 'fast', zh: '快速（更便宜/更快，可能漏信息）', en: 'Fast (cheaper/faster, may miss info)' },
+    { v: 'std', zh: '标准（推荐）', en: 'Standard (recommended)' },
+    { v: 'strong', zh: '强力（更慢，覆盖更全）', en: 'Strong (slower, more coverage)' },
+  ].forEach((x) => {
+    const op = document.createElement('option')
+    op.value = x.v
+    op.textContent = t(x.zh, x.en)
+    selStrength.appendChild(op)
+  })
+  selStrength.value = 'std'
+  rowStrength.appendChild(labStrength)
+  rowStrength.appendChild(selStrength)
+  sec.appendChild(rowStrength)
+
+  const pick = document.createElement('div')
+  pick.className = 'ain-muted'
+  pick.style.marginTop = '6px'
+  pick.textContent = t('选择要写入的资料文件：', 'Pick meta files to write:')
+  sec.appendChild(pick)
+
+  function mkCheck(label, checked) {
+    const row = document.createElement('div')
+    row.style.display = 'flex'
+    row.style.alignItems = 'center'
+    row.style.gap = '8px'
+    row.style.marginTop = '6px'
+    const cb = document.createElement('input')
+    cb.type = 'checkbox'
+    cb.checked = !!checked
+    const tx = document.createElement('div')
+    tx.className = 'ain-muted'
+    tx.textContent = label
+    row.appendChild(cb)
+    row.appendChild(tx)
+    return { row, cb }
+  }
+
+  const cProgress = mkCheck('01_进度脉络.md', true)
+  const cWorld = mkCheck('02_世界设定.md', true)
+  const cChars = mkCheck('03_主要角色.md', true)
+  const cRels = mkCheck('04_人物关系.md', true)
+  const cOutline = mkCheck('05_章节大纲.md', true)
+  sec.appendChild(cProgress.row)
+  sec.appendChild(cWorld.row)
+  sec.appendChild(cChars.row)
+  sec.appendChild(cRels.row)
+  sec.appendChild(cOutline.row)
+
+  const rowBtn = mkBtnRow()
+  const btnSet = document.createElement('button')
+  btnSet.className = 'ain-btn gray'
+  btnSet.textContent = t('设为当前项目', 'Set current')
+
+  const btnIndex = document.createElement('button')
+  btnIndex.className = 'ain-btn gray'
+  btnIndex.style.marginLeft = '8px'
+  btnIndex.textContent = t('构建/更新 RAG 索引', 'Build/Update RAG')
+
+  const btnGen = document.createElement('button')
+  btnGen.className = 'ain-btn'
+  btnGen.style.marginLeft = '8px'
+  btnGen.textContent = t('生成初始化提议', 'Generate init proposal')
+
+  const btnWrite = document.createElement('button')
+  btnWrite.className = 'ain-btn gray'
+  btnWrite.style.marginLeft = '8px'
+  btnWrite.textContent = t('写入所选资料文件', 'Write selected files')
+  btnWrite.disabled = true
+
+  rowBtn.appendChild(btnSet)
+  rowBtn.appendChild(btnIndex)
+  rowBtn.appendChild(btnGen)
+  rowBtn.appendChild(btnWrite)
+  sec.appendChild(rowBtn)
+
+  const out = document.createElement('div')
+  out.className = 'ain-out'
+  out.style.marginTop = '10px'
+  out.textContent = t('准备就绪。', 'Ready.')
+  sec.appendChild(out)
+
+  const pProgress = mkTextarea('01_进度脉络.md', '')
+  const pWorld = mkTextarea('02_世界设定.md', '')
+  const pChars = mkTextarea('03_主要角色.md', '')
+  const pRels = mkTextarea('04_人物关系.md', '')
+  const pOutline = mkTextarea('05_章节大纲.md', '')
+  pProgress.ta.style.minHeight = '120px'
+  pWorld.ta.style.minHeight = '120px'
+  pChars.ta.style.minHeight = '120px'
+  pRels.ta.style.minHeight = '120px'
+  pOutline.ta.style.minHeight = '120px'
+  sec.appendChild(pProgress.wrap)
+  sec.appendChild(pWorld.wrap)
+  sec.appendChild(pChars.wrap)
+  sec.appendChild(pRels.wrap)
+  sec.appendChild(pOutline.wrap)
+
+  body.appendChild(sec)
+
+  let lastResp = null
+  function anySelected() {
+    return !!(cProgress.cb.checked || cWorld.cb.checked || cChars.cb.checked || cRels.cb.checked || cOutline.cb.checked)
+  }
+
+  async function refreshProjectList() {
+    cfg = await loadCfg(ctx)
+    sel.innerHTML = ''
+    const list = await listProjects()
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i]
+      const op = document.createElement('option')
+      op.value = it.projectRel
+      op.textContent = it.projectRel
+      sel.appendChild(op)
+    }
+    const cur = String(cfg.currentProjectRel || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    if (cur && list.some((x) => x.projectRel === cur)) sel.value = cur
+    if (!sel.value && list.length) sel.value = list[0].projectRel
+  }
+
+  async function setCurrentProject() {
+    const v = String(sel.value || '').trim()
+    if (!v) throw new Error(t('请先选择项目', 'Pick a project first'))
+    cfg = await saveCfg(ctx, { currentProjectRel: v })
+    out.textContent = t('已设置当前项目：', 'Current project set: ') + v
+    return v
+  }
+
+  async function buildChapterListText(inf) {
+    if (!inf || !inf.projectAbs) return ''
+    const base = String(inf.projectAbs)
+    const chapDir = joinFsPath(base, '03_章节')
+    let files = await listMarkdownFilesAny(ctx, chapDir)
+    let scope = '03_章节'
+    const fromChapDir = !!(files && files.length)
+    if (!files.length) {
+      files = await listMarkdownFilesAny(ctx, base)
+      scope = t('项目目录（回退）', 'Project root (fallback)')
+    }
+    const skipBase = new Set([
+      '00_项目.md',
+      '01_进度脉络.md',
+      '02_故事圣经.md',
+      '02_世界设定.md',
+      '03_主要角色.md',
+      '04_人物关系.md',
+      '05_章节大纲.md',
+      '.ainovel/index.json',
+    ].map((x) => x.toLowerCase()))
+    files = (files || []).filter((p) => {
+      const abs = normFsPath(p)
+      if (!abs) return false
+      const rel = abs.startsWith(normFsPath(base)) ? abs.slice(normFsPath(base).length).replace(/^\/+/, '') : ''
+      if (!rel) return false
+      if (rel.startsWith('.ainovel/')) return false
+      if (fromChapDir) return true
+      const bn = fsBaseName(rel).toLowerCase()
+      if (skipBase.has(bn)) return false
+      return true
+    })
+    files.sort((a, b) => a.localeCompare(b))
+    const maxN = 80
+    const lines = []
+    for (let i = 0; i < files.length && i < maxN; i++) {
+      lines.push('- ' + fsBaseName(files[i]))
+    }
+    if (!lines.length) return ''
+    return t('范围：', 'Scope: ') + scope + '\n' + lines.join('\n')
+  }
+
+  async function collectRagForInit(ctx, cfg, strength) {
+    const s = String(strength || 'std')
+    const prof = s === 'fast'
+      ? { topK: 6, maxChars: 2600, hitMaxChars: 900, maxTotal: 7000 }
+      : (s === 'strong'
+        ? { topK: 12, maxChars: 5200, hitMaxChars: 1200, maxTotal: 14000 }
+        : { topK: 9, maxChars: 3800, hitMaxChars: 1100, maxTotal: 10000 })
+
+    const queries = [
+      '总结：主要角色清单（含身份/动机/当前状态/关键转折）。',
+      '总结：人物关系网（A↔B：关系/矛盾/利益/变化节点）。',
+      '总结：世界设定（规则/地点/势力/组织/体系/限制）。',
+      '梳理：主线剧情时间线（关键事件顺序/转折/当前未解冲突）。',
+      '梳理：伏笔清单（已埋/已回收/待回收）。',
+      '按章节：每章一句话概括（若只能推断文件名也要标注不确定）。',
+    ]
+
+    const seen = new Set()
+    const merged = []
+    let used = 0
+    for (let i = 0; i < queries.length; i++) {
+      let hits = null
+      try {
+        hits = await rag_get_hits(ctx, cfg, queries[i], { topK: prof.topK, maxChars: prof.maxChars, hitMaxChars: prof.hitMaxChars })
+      } catch {
+        hits = null
+      }
+      if (!hits || !hits.length) continue
+      for (let j = 0; j < hits.length; j++) {
+        const h = hits[j]
+        const key = safeText(h && h.source).trim() + '\n' + safeText(h && h.text).trim()
+        if (!key.trim()) continue
+        if (seen.has(key)) continue
+        const add = safeText(h && h.text).trim()
+        if (!add) continue
+        if (used + add.length > prof.maxTotal) return merged.length ? merged : null
+        used += add.length
+        seen.add(key)
+        merged.push({ source: safeText(h && h.source).trim(), text: add })
+      }
+    }
+    return merged.length ? merged : null
+  }
+
+  btnSet.onclick = () => { setCurrentProject().catch((e) => ctx.ui.notice(t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)) }
+
+  btnIndex.onclick = async () => {
+    try {
+      await setCurrentProject()
+      cfg = await loadCfg(ctx)
+      setBusy(btnIndex, true)
+      out.textContent = t('构建索引中…', 'Building index...')
+      await rag_build_or_update_index(ctx, cfg, {
+        onTick: ({ done, total }) => {
+          out.textContent = t('构建索引中… ', 'Building index... ') + String(done) + '/' + String(total)
+        }
+      })
+      ctx.ui.notice(t('RAG 索引已更新', 'RAG index updated'), 'ok', 1600)
+      out.textContent = t('索引已更新。下一步：生成初始化提议。', 'Index ready. Next: generate proposal.')
+    } catch (e) {
+      out.textContent = t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e))
+    } finally {
+      setBusy(btnIndex, false)
+    }
+  }
+
+  btnGen.onclick = async () => {
+    try {
+      if (!anySelected()) {
+        ctx.ui.notice(t('请至少选择一个资料文件', 'Pick at least one file'), 'err', 2000)
+        return
+      }
+      await setCurrentProject()
+      cfg = await loadCfg(ctx)
+      const inf = await inferProjectDir(ctx, cfg)
+      if (!inf) throw new Error(t('无法推断当前项目：请先在“项目管理”选择项目或打开项目内文件。', 'Cannot infer project; select one or open a file under it.'))
+
+      const strength = String(selStrength.value || 'std')
+      const chapters = await buildChapterListText(inf)
+      const progress = await getProgressDocText(ctx, cfg)
+      const prev = await getPrevTextForRequest(ctx, cfg)
+      const constraints = mergeConstraints(cfg, safeText(cons.ta.value).trim())
+      const goalText = safeText(goal.ta.value).trim()
+
+      setBusy(btnGen, true)
+      btnWrite.disabled = true
+      lastResp = null
+      out.textContent = t('生成初始化提议中…（不计费）', 'Generating init proposal... (no billing)')
+
+      let rag = null
+      try {
+        rag = await collectRagForInit(ctx, cfg, strength)
+      } catch {
+        rag = null
+      }
+
+      const resp = await apiFetchConsultWithJob(ctx, cfg, {
+        upstream: {
+          baseUrl: cfg.upstream.baseUrl,
+          apiKey: cfg.upstream.apiKey,
+          model: cfg.upstream.model
+        },
+        input: {
+          async: true,
+          mode: 'job',
+          task: 'init_project',
+          goal: goalText,
+          constraints,
+          progress,
+          prev,
+          chapters,
+          rag: rag || undefined,
+          // 兼容旧后端：带 question 兜底
+          question: [
+            '任务：从现有正文中反向提取并重建项目资料文件（进度/设定/角色/关系/大纲）。',
+            '必须按分节输出并最后写【END】。',
+          ].join('\n')
+        }
+      }, {
+        onTick: ({ waitMs }) => {
+          const s = Math.max(0, Math.round(waitMs / 1000))
+          out.textContent = t('生成中… 已等待 ', 'Generating... waited ') + s + 's'
+        }
+      })
+
+      lastResp = resp
+      const data = resp && resp.data && typeof resp.data === 'object' ? resp.data : null
+      const pr = data && data.progress != null ? String(data.progress) : ''
+      const w = data && data.world != null ? String(data.world) : ''
+      const ch = data && data.characters != null ? String(data.characters) : ''
+      const rl = data && data.relations != null ? String(data.relations) : ''
+      const ol = data && data.outline != null ? String(data.outline) : ''
+      pProgress.ta.value = pr.trim()
+      pWorld.ta.value = w.trim()
+      pChars.ta.value = ch.trim()
+      pRels.ta.value = rl.trim()
+      pOutline.ta.value = ol.trim()
+
+      btnWrite.disabled = false
+      out.textContent = safeText(resp && resp.text).trim() || t('已生成提议', 'Proposal ready')
+      ctx.ui.notice(t('已生成初始化提议（未写入）', 'Proposal ready (not written)'), 'ok', 1800)
+    } catch (e) {
+      out.textContent = t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e))
+    } finally {
+      setBusy(btnGen, false)
+    }
+  }
+
+  async function ensureProjectSkeleton(inf) {
+    if (!inf || !inf.projectAbs) return
+    const base = String(inf.projectAbs)
+    try {
+      if (!(await fileExists(ctx, joinFsPath(base, '.ainovel/index.json')))) {
+        await writeTextAny(ctx, joinFsPath(base, '.ainovel/index.json'), JSON.stringify({ version: 1, created_at: Date.now() }, null, 2))
+      }
+    } catch {}
+    try {
+      if (!(await fileExists(ctx, joinFsPath(base, '00_项目.md')))) {
+        const name = inf.projectName || safeFileName(fsBaseName(base), '项目')
+        const metaMd = ['# ' + name, '', '- 本项目由“导入现有文稿（初始化资料）”创建资料文件。', '- 资料文件：01_进度脉络/02_世界设定/03_主要角色/04_人物关系/05_章节大纲', ''].join('\n')
+        await writeTextAny(ctx, joinFsPath(base, '00_项目.md'), metaMd)
+      }
+    } catch {}
+    try { if (!(await fileExists(ctx, joinFsPath(base, '01_进度脉络.md')))) await writeTextAny(ctx, joinFsPath(base, '01_进度脉络.md'), '# 进度脉络\n\n') } catch {}
+    try { if (!(await fileExists(ctx, joinFsPath(base, '02_世界设定.md')))) await writeTextAny(ctx, joinFsPath(base, '02_世界设定.md'), '# 世界设定\n\n') } catch {}
+    try { if (!(await fileExists(ctx, joinFsPath(base, '03_主要角色.md')))) await writeTextAny(ctx, joinFsPath(base, '03_主要角色.md'), '# 主要角色\n\n') } catch {}
+    try { if (!(await fileExists(ctx, joinFsPath(base, '04_人物关系.md')))) await writeTextAny(ctx, joinFsPath(base, '04_人物关系.md'), '# 人物关系\n\n') } catch {}
+    try { if (!(await fileExists(ctx, joinFsPath(base, '05_章节大纲.md')))) await writeTextAny(ctx, joinFsPath(base, '05_章节大纲.md'), '# 章节大纲\n\n') } catch {}
+  }
+
+  btnWrite.onclick = async () => {
+    try {
+      await setCurrentProject()
+      cfg = await loadCfg(ctx)
+      const inf = await inferProjectDir(ctx, cfg)
+      if (!inf) throw new Error(t('无法推断当前项目', 'Cannot infer project'))
+      if (!anySelected()) return
+
+      function stripDocHeading(s) {
+        const t0 = safeText(s).trim()
+        return t0.replace(/^#\\s+.*\\n+/u, '').trim()
+      }
+
+      const todo = []
+      if (cProgress.cb.checked) todo.push(['01_进度脉络.md', '# 进度脉络\n\n' + stripDocHeading(pProgress.ta.value) + '\n'])
+      if (cWorld.cb.checked) todo.push(['02_世界设定.md', '# 世界设定\n\n' + stripDocHeading(pWorld.ta.value) + '\n'])
+      if (cChars.cb.checked) todo.push(['03_主要角色.md', '# 主要角色\n\n' + stripDocHeading(pChars.ta.value) + '\n'])
+      if (cRels.cb.checked) todo.push(['04_人物关系.md', '# 人物关系\n\n' + stripDocHeading(pRels.ta.value) + '\n'])
+      if (cOutline.cb.checked) todo.push(['05_章节大纲.md', '# 章节大纲\n\n' + stripDocHeading(pOutline.ta.value) + '\n'])
+
+      const bad = todo.filter((x) => !safeText(x[1]).trim().replace(/^#\\s+.*\\n+/u, '').trim())
+      if (bad.length) throw new Error(t('有文件内容为空，拒绝写入：', 'Refuse to write empty: ') + bad.map((x) => x[0]).join(', '))
+
+      const ok = await openConfirmDialog(ctx, {
+        title: t('写入资料文件', 'Write meta files'),
+        message: t('将覆盖写入以下文件：\n', 'Will overwrite files:\n') + todo.map((x) => '- ' + x[0]).join('\n')
+      })
+      if (!ok) return
+
+      setBusy(btnWrite, true)
+      await ensureProjectSkeleton(inf)
+      for (let i = 0; i < todo.length; i++) {
+        await writeTextAny(ctx, joinFsPath(inf.projectAbs, todo[i][0]), todo[i][1])
+      }
+      ctx.ui.notice(t('已写入资料文件', 'Meta files written'), 'ok', 1800)
+      btnWrite.disabled = true
+
+      const okIdx = await openConfirmDialog(ctx, {
+        title: t('更新 RAG 索引', 'Update RAG index'),
+        message: t('资料已写入。现在更新 RAG 索引以便检索命中最新内容？（会调用 embedding）', 'Meta written. Update RAG index now? (will call embeddings)')
+      })
+      if (okIdx) {
+        try {
+          setBusy(btnWrite, true)
+          await rag_build_or_update_index(ctx, cfg)
+          ctx.ui.notice(t('RAG 索引已更新', 'RAG index updated'), 'ok', 1600)
+        } catch (e) {
+          ctx.ui.notice(t('RAG 更新失败：', 'RAG update failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)
+        }
+      }
+    } catch (e) {
+      ctx.ui.notice(t('写入失败：', 'Write failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)
+    } finally {
+      setBusy(btnWrite, false)
+    }
+  }
+
+  await refreshProjectList()
+}
+
 async function openRagIndexDialog(ctx) {
   let cfg = await loadCfg(ctx)
   if (!cfg.token) throw new Error(t('请先登录后端', 'Please login first'))
@@ -4372,6 +4864,16 @@ export function activate(context) {
           onClick: async () => {
             try {
               await openBootstrapDialog(context)
+            } catch (e) {
+              context.ui.notice(t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)
+            }
+          }
+        },
+        {
+          label: t('导入现有文稿（初始化资料）', 'Import existing writing (init meta)'),
+          onClick: async () => {
+            try {
+              await openImportExistingDialog(context)
             } catch (e) {
               context.ui.notice(t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)
             }

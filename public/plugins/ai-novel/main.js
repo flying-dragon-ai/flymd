@@ -55,8 +55,11 @@ const DEFAULT_CFG = {
     enabled: false,
     // 写作字数目标（总字数）：为了审阅成本，最大只允许到 4000
     targetChars: 3000,
-    // 强思考：每段写作前重新检索（更慢但更稳）
-    strongThinking: false,
+    // 思考模式（默认 none）：
+    // - none：不思考（就是现在的 Agent：咨询只显示，不注入写作）
+    // - normal：正常思考（把咨询提炼出的检查清单注入每段写作上下文）
+    // - strong：强思考（每段写作前刷新检索 + 注入咨询清单，更慢更贵但更稳）
+    thinkingMode: 'none',
     // 自动审计默认关闭（让用户自己决定要不要花预算）
     audit: false
   }
@@ -1948,7 +1951,7 @@ async function openSettingsDialog(ctx) {
   const rowUp2 = document.createElement('div')
   rowUp2.className = 'ain-row'
   const inpUpModel = mkInput(t('chat 模型', 'Chat model'), cfg.upstream && cfg.upstream.model ? cfg.upstream.model : '')
-  const inpNovelRoot = mkInput(t('小说根目录（相对库根）', 'Novel root dir (relative to library)'), cfg.novelRootDir || '小说/')
+  const inpNovelRoot = mkInput(t('小说根目录（务必在主程序库管理设定好库文件夹！）', 'Novel root dir (relative to library)'), cfg.novelRootDir || '小说/')
   rowUp2.appendChild(inpUpModel.wrap)
   rowUp2.appendChild(inpNovelRoot.wrap)
   secUp.appendChild(rowUp2)
@@ -2121,6 +2124,14 @@ async function openSettingsDialog(ctx) {
     } catch {}
     return 3000
   })()
+  const agentMode0 = (() => {
+    try {
+      const a = _ainAgentGetCfg(cfg)
+      const v = a && a.thinkingMode ? String(a.thinkingMode) : ''
+      return (v === 'none' || v === 'normal' || v === 'strong') ? v : 'none'
+    } catch {}
+    return 'none'
+  })()
 
   const selAgentTarget = mkSelect(
     t('写作字数（Agent）', 'Target chars (Agent)'),
@@ -2149,33 +2160,27 @@ async function openSettingsDialog(ctx) {
   auditWrap.appendChild(auditLab)
   auditWrap.appendChild(auditLine)
 
-  const thinkWrap = document.createElement('div')
-  const thinkLab = document.createElement('div')
-  thinkLab.className = 'ain-lab'
-  thinkLab.textContent = t('强思考模式', 'Strong thinking')
-  const thinkLine = document.createElement('label')
-  thinkLine.style.display = 'flex'
-  thinkLine.style.gap = '8px'
-  thinkLine.style.alignItems = 'center'
-  const cbStrongThink = document.createElement('input')
-  cbStrongThink.type = 'checkbox'
-  cbStrongThink.checked = !!(cfg.agent && cfg.agent.strongThinking)
-  thinkLine.appendChild(cbStrongThink)
-  thinkLine.appendChild(document.createTextNode(t('启用强思考模式：每段写作前刷新检索（更慢）', 'Enable strong thinking: refresh RAG before each segment (slower)')))
-  thinkWrap.appendChild(thinkLab)
-  thinkWrap.appendChild(thinkLine)
+  const selThinkingMode = mkSelect(
+    t('思考模式（Agent）', 'Thinking mode (Agent)'),
+    [
+      { value: 'none', label: t('不思考（默认）：咨询只显示，不影响写作', 'None (default): consult is shown only') },
+      { value: 'normal', label: t('正常思考：注入咨询检查清单（更稳）', 'Normal: inject consult checklist (steadier)') },
+      { value: 'strong', label: t('强思考：每段写前刷新检索 + 注入清单（更慢）', 'Strong: refresh RAG before each segment + checklist (slower)') },
+    ],
+    agentMode0
+  )
 
   rowAgent.appendChild(selAgentTarget.wrap)
   rowAgent.appendChild(auditWrap)
+  rowAgent.appendChild(selThinkingMode.wrap)
   secAgent.appendChild(rowAgent)
-  secAgent.appendChild(thinkWrap)
 
   const hintAgent = document.createElement('div')
   hintAgent.className = 'ain-muted'
   hintAgent.style.marginTop = '6px'
   hintAgent.textContent = t(
-    '提示：Agent 会先生成 TODO，再逐项执行；写作会按你选择的字数目标控制在 ≤4000 字（为了审阅成本），但会更耗字符余额、也更慢。',
-    'Note: Agent generates TODO then executes step-by-step; writing is capped to ≤4000 chars (for review cost), but it usually costs more chars and is slower.'
+    '提示：Agent 会先生成 TODO，再逐项执行；写作会按字数目标控制在 ≤4000 字（为了审阅成本），但会更耗字符余额、也更慢。“正常/强思考”会把咨询提炼的检查清单注入每段写作；强思考还会在每段写前刷新检索。',
+    'Note: Agent generates TODO then executes step-by-step; writing is capped to ≤4000 chars (for review cost), but it usually costs more chars and is slower. Normal/Strong inject the consult checklist into each segment; Strong also refreshes RAG before each segment.'
   )
   secAgent.appendChild(hintAgent)
 
@@ -2229,7 +2234,7 @@ async function openSettingsDialog(ctx) {
         agent: {
           enabled: !!cbAgent.checked,
           targetChars: parseInt(String(selAgentTarget.sel.value || '3000'), 10) || 3000,
-          strongThinking: !!cbStrongThink.checked,
+          thinkingMode: _ainAgentNormThinkingMode(selThinkingMode.sel.value) || 'none',
           audit: !!cbAudit.checked
         },
       }
@@ -3063,20 +3068,34 @@ async function openWriteWithChoiceDialog(ctx) {
   auditLine.appendChild(document.createTextNode(t('自动审计（更耗字符）', 'Auto audit (costs more)')))
   agentBox.appendChild(auditLine)
 
-  const strongLine = document.createElement('label')
-  strongLine.style.display = 'flex'
-  strongLine.style.gap = '8px'
-  strongLine.style.alignItems = 'center'
-  const cbStrongThink = document.createElement('input')
-  cbStrongThink.type = 'checkbox'
-  cbStrongThink.checked = !!a0.strongThinking
-  strongLine.appendChild(cbStrongThink)
-  strongLine.appendChild(document.createTextNode(t('强思考模式', 'Strong thinking mode')))
-  agentBox.appendChild(strongLine)
+  const modeLine = document.createElement('label')
+  modeLine.style.display = 'flex'
+  modeLine.style.gap = '8px'
+  modeLine.style.alignItems = 'center'
+  const selThinkingMode = document.createElement('select')
+  selThinkingMode.className = 'ain-in ain-select'
+  selThinkingMode.style.width = '260px'
+  ;[
+    { v: 'none', zh: '不思考（普遍场景）', en: 'None (default)' },
+    { v: 'normal', zh: '正常思考（提升质量）', en: 'Normal (inject checklist)' },
+    { v: 'strong', zh: '强思考（校对增强）', en: 'Strong (slower, steadier)' },
+  ].forEach((it) => {
+    const op = document.createElement('option')
+    op.value = String(it.v)
+    op.textContent = t(String(it.zh), String(it.en))
+    selThinkingMode.appendChild(op)
+  })
+  try { selThinkingMode.value = String(a0.thinkingMode || 'none') } catch {}
+  modeLine.appendChild(document.createTextNode(t('思考模式：', 'Mode: ')))
+  modeLine.appendChild(selThinkingMode)
+  agentBox.appendChild(modeLine)
 
   const agentHint = document.createElement('div')
   agentHint.className = 'ain-muted'
-  agentHint.textContent = t('提示：Agent 会先生成 TODO，再逐项执行，并在窗口实时更新进度；正文会按字数目标控制在 ≤4000 字（为了审阅成本），通常更耗字符余额；强思考模式会在每段写作前刷新检索（更慢但更稳）。', 'Note: Agent generates TODO then executes step-by-step with live progress; prose is capped to ≤4000 chars (for review cost), usually costs more chars; strong thinking refreshes RAG before each segment (slower but steadier).')
+  agentHint.textContent = t(
+    '提示：Agent 会先生成Plan，再逐项执行；思考模式：不思考=普遍场景；正常=写作时会自查修整；强思考=正常思考前提下加入额外的索引，适用复杂剧情。',
+    'Note: Agent generates TODO then executes step-by-step with live progress; prose is capped to ≤4000 chars (for review cost), usually costs more chars; Mode: None=consult shown only; Normal=inject consult checklist; Strong=refresh RAG before each segment + checklist (slower, steadier).'
+  )
   sec.appendChild(agentBox)
   sec.appendChild(agentHint)
 
@@ -3368,6 +3387,12 @@ async function openWriteWithChoiceDialog(ctx) {
         const targetChars = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
         const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         const wantAudit = !!cbAudit.checked
+        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
+        // 记住用户选择（但不强行改动“是否默认启用 Agent”）
+        try {
+          const curEnabled = !!(cfg && cfg.agent && cfg.agent.enabled)
+          cfg = await saveCfg(ctx, { agent: { enabled: curEnabled, targetChars, thinkingMode, audit: wantAudit } })
+        } catch {}
         try { agentProgress.style.display = '' } catch {}
         try { agentLog.textContent = t('Agent 执行中…', 'Agent running...') } catch {}
 
@@ -3380,7 +3405,7 @@ async function openWriteWithChoiceDialog(ctx) {
           progress,
           bible,
           rag: rag || null,
-          strongThinking: !!cbStrongThink.checked,
+          thinkingMode,
           targetChars,
           chunkCount,
           audit: wantAudit
@@ -3460,6 +3485,12 @@ async function openWriteWithChoiceDialog(ctx) {
         const targetChars = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
         const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         const wantAudit = !!cbAudit.checked
+        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
+        // 记住用户选择（但不强行改动“是否默认启用 Agent”）
+        try {
+          const curEnabled = !!(cfg && cfg.agent && cfg.agent.enabled)
+          cfg = await saveCfg(ctx, { agent: { enabled: curEnabled, targetChars, thinkingMode, audit: wantAudit } })
+        } catch {}
         try { agentProgress.style.display = '' } catch {}
         try { agentLog.textContent = t('Agent 执行中…', 'Agent running...') } catch {}
 
@@ -3472,7 +3503,7 @@ async function openWriteWithChoiceDialog(ctx) {
           progress,
           bible,
           rag: rag || null,
-          strongThinking: !!cbStrongThink.checked,
+          thinkingMode,
           targetChars,
           chunkCount,
           audit: wantAudit
@@ -3636,6 +3667,116 @@ async function callNovel(ctx, action, instructionOverride, constraintsOverride) 
   return { json, instruction }
 }
 
+function _ainAgentNormThinkingMode(v) {
+  const raw = safeText(v).trim()
+  if (!raw) return ''
+  const s = raw.toLowerCase()
+  if (s === 'none' || s === 'off' || s === 'no' || s === '0') return 'none'
+  if (s === 'normal' || s === 'std' || s === 'standard') return 'normal'
+  if (s === 'strong' || s === 'hard' || s === 'st') return 'strong'
+  // 兼容中文存储（极少数场景可能会有）
+  if (raw === '不思考') return 'none'
+  if (raw === '正常思考') return 'normal'
+  if (raw === '强思考') return 'strong'
+  return ''
+}
+
+function _ainAgentExtractChecklistFromConsult(text, maxChars) {
+  const t0 = safeText(text).replace(/\r\n/g, '\n').replace(/^\uFEFF/, '').trim()
+  if (!t0) return ''
+
+  // 参考“更新资料文件”的分节截断：让 AI 把“检查清单”和“需要补充”分开写，我们只取检查清单。
+  const keys = [
+    { k: 'checklist', names: ['写作检查清单', '检查清单', '写作蓝图', '蓝图', '修改建议', '建议', 'Checklist', 'Blueprint'] },
+    { k: 'questions', names: ['需要你补充', '需要补充', '待补充', '待确认', '问题', 'Questions', 'Need your input'] },
+  ]
+  const out0 = { checklist: [], questions: [] }
+  let cur = 'checklist'
+
+  const lines = t0.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const raw = String(lines[i] || '')
+    let x = raw.trim()
+    if (!x) continue
+
+    let head = x
+    const mm = /^#{1,6}\s*(.+)$/.exec(x)
+    if (mm && mm[1]) head = String(mm[1]).trim()
+
+    let matched = false
+    let rest = ''
+    for (let j = 0; j < keys.length; j++) {
+      const it = keys[j]
+      const names = Array.isArray(it.names) ? it.names : []
+      for (let n = 0; n < names.length; n++) {
+        const nm = String(names[n] || '').trim()
+        if (!nm) continue
+        const esc = nm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        if (head === `【${nm}】` || head === `[${nm}]`) {
+          cur = it.k
+          matched = true
+          rest = ''
+          break
+        }
+        let m1 = new RegExp(`^【${esc}】\\s*(.*)$`).exec(head)
+        if (m1 && m1[1] != null) {
+          cur = it.k
+          matched = true
+          rest = String(m1[1] || '').trim()
+          break
+        }
+        let m2 = new RegExp(`^\\[${esc}\\]\\s*(.*)$`).exec(head)
+        if (m2 && m2[1] != null) {
+          cur = it.k
+          matched = true
+          rest = String(m2[1] || '').trim()
+          break
+        }
+        let m3 = new RegExp(`^${esc}\\s*[:：]\\s*(.*)$`).exec(head)
+        if (m3 && m3[1] != null) {
+          cur = it.k
+          matched = true
+          rest = String(m3[1] || '').trim()
+          break
+        }
+      }
+      if (matched) break
+    }
+    if (matched) {
+      if (rest) out0[cur].push(rest)
+      continue
+    }
+    if (!out0[cur]) continue
+    out0[cur].push(x)
+  }
+
+  let s = safeText(out0.checklist.join('\n')).trim()
+  if (!s) {
+    // 兜底：没分节时，用粗暴截断，把“需要你补充”之后丢掉。
+    s = t0
+    const cutMarks = ['【需要你补充】', '【需要补充】', '【待补充】', '【待确认】', '【问题】']
+    for (let i = 0; i < cutMarks.length; i++) {
+      const at = s.indexOf(cutMarks[i])
+      if (at >= 0) {
+        s = s.slice(0, at).trim()
+        break
+      }
+    }
+  }
+  s = s.replace(/\n{3,}/g, '\n\n').trim()
+  if (!s) return ''
+
+  const m = Math.max(200, (maxChars | 0) || 900)
+  if (s.length <= m) return s
+  // 尽量在句号/换行处截断
+  const min = Math.max(0, m - 120)
+  for (let i = m; i > min; i--) {
+    const ch = s[i - 1]
+    if (_ainDiffIsBreakChar(ch)) return s.slice(0, i).trimEnd()
+  }
+  return s.slice(0, m).trimEnd()
+}
+
 function _ainAgentGetCfg(cfg) {
   const a = (cfg && cfg.agent && typeof cfg.agent === 'object') ? cfg.agent : {}
 
@@ -3661,10 +3802,18 @@ function _ainAgentGetCfg(cfg) {
     }
   }
 
+  // 新配置：thinkingMode；旧配置：strongThinking（映射为 strong）
+  let thinkingMode =
+    _ainAgentNormThinkingMode(a.thinkingMode != null ? a.thinkingMode : (a.thinking_mode != null ? a.thinking_mode : '')) ||
+    (a.strongThinking || a.strong_thinking ? 'strong' : 'none')
+  if (!(thinkingMode === 'none' || thinkingMode === 'normal' || thinkingMode === 'strong')) thinkingMode = 'none'
+
   return {
     enabled: !!a.enabled,
     targetChars: targetChars,
-    strongThinking: !!(a.strongThinking || a.strong_thinking),
+    thinkingMode: thinkingMode,
+    // 兼容旧字段：外部若还在读 strongThinking，不会直接炸
+    strongThinking: thinkingMode === 'strong',
     audit: !!a.audit,
   }
 }
@@ -3795,6 +3944,10 @@ function _ainAgentValidatePlan(items, chunkCount, wantAudit) {
   const hasConsult = arr.some((x) => x && x.type === 'consult')
   const hasFinal = arr.some((x) => x && x.type === 'final')
   if (!hasConsult || !hasFinal) return false
+  // 保证 consult 在首次 write 之前：否则“正常/强思考”的检查清单注入就失效。
+  const idxC = arr.findIndex((x) => x && x.type === 'consult')
+  const idxW = arr.findIndex((x) => x && x.type === 'write')
+  if (idxC < 0 || idxW < 0 || idxC > idxW) return false
   if (w !== _clampInt(chunkCount, 1, 3)) return false
   if (wantAudit && !arr.some((x) => x && x.type === 'audit')) return false
   return true
@@ -3805,7 +3958,10 @@ async function agentBuildPlan(ctx, cfg, base) {
   const targetChars = (t0 === 1000 || t0 === 2000 || t0 === 3000 || t0 === 4000) ? t0 : 3000
   const chunkCount = _clampInt(base && base.chunkCount != null ? base.chunkCount : _ainAgentDeriveChunkCount(targetChars), 1, 3)
   const wantAudit = !!(base && base.audit)
-  const strongThinking = !!(base && base.strongThinking)
+  const thinkingMode =
+    _ainAgentNormThinkingMode(base && base.thinkingMode) ||
+    (base && base.strongThinking ? 'strong' : 'none')
+  const strongThinking = thinkingMode === 'strong'
 
   try {
     const resp = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
@@ -3824,7 +3980,7 @@ async function agentBuildPlan(ctx, cfg, base) {
         choice: base && base.choice != null ? base.choice : undefined,
         constraints: safeText(base && base.constraints).trim() || undefined,
         rag: base && base.rag ? base.rag : undefined,
-        agent: { chunk_count: chunkCount, target_chars: targetChars, include_audit: wantAudit, strong_thinking: strongThinking }
+        agent: { chunk_count: chunkCount, target_chars: targetChars, include_audit: wantAudit, strong_thinking: strongThinking, thinking_mode: thinkingMode }
       }
     })
     let raw = Array.isArray(resp && resp.data) ? resp.data : null
@@ -3858,7 +4014,11 @@ async function agentRunPlan(ctx, cfg, base, ui) {
   const targetChars = (t0 === 1000 || t0 === 2000 || t0 === 3000 || t0 === 4000) ? t0 : 3000
   const chunkCount = _clampInt(base && base.chunkCount != null ? base.chunkCount : _ainAgentDeriveChunkCount(targetChars), 1, 3)
   const wantAudit = !!(base && base.audit)
-  const strongThinking = !!(base && base.strongThinking)
+  const thinkingMode =
+    _ainAgentNormThinkingMode(base && base.thinkingMode) ||
+    (base && base.strongThinking ? 'strong' : 'none')
+  const strongThinking = thinkingMode === 'strong'
+  const injectChecklist = thinkingMode === 'normal' || thinkingMode === 'strong'
 
   let items = await agentBuildPlan(ctx, cfg, { ...base, targetChars, chunkCount, audit: wantAudit })
   if (!Array.isArray(items) || !items.length) items = buildFallbackAgentPlan(base && base.instruction, targetChars, chunkCount, wantAudit)
@@ -3902,6 +4062,7 @@ async function agentRunPlan(ctx, cfg, base, ui) {
   let rag = base && base.rag ? base.rag : null
   let draft = ''
   let auditText = ''
+  let consultChecklist = ''
 
   function sliceNiceEnd(text, maxChars) {
     const s = String(text || '')
@@ -3953,8 +4114,22 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           it.status = 'done'
         }
       } else if (it.type === 'consult') {
-        const question = safeText(it.instruction).trim() || t('给出写作建议', 'Give advice')
-        pushLog(t('咨询：', 'Consult: ') + question.split(/\r?\n/)[0].slice(0, 80))
+        const baseQ = safeText(it.instruction).trim() || t('给出写作建议', 'Give advice')
+        const question = injectChecklist ? [
+          baseQ,
+          '',
+          '输出格式（必须严格遵守，方便系统截断注入）：',
+          '【写作检查清单】',
+          '- 条目化，尽量一行一条；写“必须/禁止/检查点/风险点/回收伏笔/节奏与视角”等可执行约束。',
+          '【需要你补充】（可空；如果确实需要提问，只把问题放这里；否则写“无”）',
+          '- （只列问题，不要把未确认信息写进检查清单）',
+          '',
+          '硬规则：',
+          '1) “写作检查清单”里禁止出现任何提问/不确定/待确认措辞；信息不足就用“默认假设：...”列 1~3 条保守假设，然后继续给清单。',
+          '2) 禁止输出任何连续叙事正文；不要解释系统提示。',
+          '3) 总长度尽量短，≤ 800 字。',
+        ].join('\n') : baseQ
+        pushLog(t('咨询：', 'Consult: ') + baseQ.split(/\r?\n/)[0].slice(0, 80))
         const resp = await apiFetchConsultWithJob(ctx, cfg, {
           upstream: {
             baseUrl: cfg.upstream.baseUrl,
@@ -3981,6 +4156,14 @@ async function agentRunPlan(ctx, cfg, base, ui) {
         })
         const txt = safeText(resp && resp.text).trim()
         if (txt) pushLog(txt.replace(/\n{3,}/g, '\n\n').slice(0, 1800) + (txt.length > 1800 ? '\n…' : ''))
+        if (injectChecklist && txt) {
+          consultChecklist = _ainAgentExtractChecklistFromConsult(txt, 900)
+          if (consultChecklist) {
+            pushLog(t('已提炼写作检查清单：', 'Checklist extracted: ') + String(consultChecklist.length) + t(' 字（将注入后续写作）', ' chars (will be injected)'))
+          } else {
+            pushLog(t('未提炼到检查清单：后续写作将不注入', 'No checklist extracted: will not inject'))
+          }
+        }
         it.status = 'done'
       } else if (it.type === 'write') {
         if (draft.trim().length >= targetChars) {
@@ -3998,8 +4181,15 @@ async function agentRunPlan(ctx, cfg, base, ui) {
         const rest = Math.max(0, targetChars - draft.trim().length)
         const perChunk = Math.max(600, Math.floor(targetChars / chunkCount))
         const wantLen = Math.max(300, Math.min(perChunk, rest || perChunk))
+        const checklistBlock = (injectChecklist && consultChecklist) ? [
+          '【写作检查清单（只用于约束写作，不要在正文中直接输出）】',
+          consultChecklist,
+          '注意：不要在正文中复述/列出检查清单，只需要遵守它。'
+        ].join('\n') : ''
         const ins2 = [
           instruction,
+          '',
+          checklistBlock,
           '',
           `长度目标：本章总字数≈${targetChars}（上限 4000）；本段尽量控制在 ≈${wantLen} 字（允许 ±15%），避免超长。`
         ].filter(Boolean).join('\n')
@@ -4549,21 +4739,35 @@ async function openBootstrapDialog(ctx) {
   auditLine.appendChild(document.createTextNode(t('自动审计（更耗字符）', 'Auto audit (costs more)')))
   agentBox.appendChild(auditLine)
 
-  const strongLine = document.createElement('label')
-  strongLine.style.display = 'flex'
-  strongLine.style.gap = '8px'
-  strongLine.style.alignItems = 'center'
-  const cbStrongThink = document.createElement('input')
-  cbStrongThink.type = 'checkbox'
-  cbStrongThink.checked = !!a0.strongThinking
-  strongLine.appendChild(cbStrongThink)
-  strongLine.appendChild(document.createTextNode(t('强思考模式', 'Strong thinking mode')))
-  agentBox.appendChild(strongLine)
+  const modeLine = document.createElement('label')
+  modeLine.style.display = 'flex'
+  modeLine.style.gap = '8px'
+  modeLine.style.alignItems = 'center'
+  const selThinkingMode = document.createElement('select')
+  selThinkingMode.className = 'ain-in ain-select'
+  selThinkingMode.style.width = '260px'
+  ;[
+    { v: 'none', zh: '不思考', en: 'None (default)' },
+    { v: 'normal', zh: '正常思考', en: 'Normal (inject checklist)' },
+    { v: 'strong', zh: '强思考', en: 'Strong (slower, steadier)' },
+  ].forEach((it) => {
+    const op = document.createElement('option')
+    op.value = String(it.v)
+    op.textContent = t(String(it.zh), String(it.en))
+    selThinkingMode.appendChild(op)
+  })
+  try { selThinkingMode.value = String(a0.thinkingMode || 'none') } catch {}
+  modeLine.appendChild(document.createTextNode(t('思考模式：', 'Mode: ')))
+  modeLine.appendChild(selThinkingMode)
+  agentBox.appendChild(modeLine)
 
   const agentHint = document.createElement('div')
   agentHint.className = 'ain-muted'
   agentHint.style.marginTop = '6px'
-  agentHint.textContent = t('提示：Agent 会先生成 TODO，再逐项执行，并实时显示进度；正文会按字数目标控制在 ≤4000 字（为了审阅成本），通常更耗字符余额；强思考模式会在每段写作前刷新检索（更慢但更稳）。', 'Note: Agent generates TODO then executes step-by-step with live progress; prose is capped to ≤4000 chars (for review cost), usually costs more chars; strong thinking refreshes RAG before each segment (slower but steadier).')
+  agentHint.textContent = t(
+    '提示：Agent 会先生成 TODO，再逐项执行，并实时显示进度；正文会按字数目标控制在 ≤4000 字（为了审阅成本），通常更耗字符余额；思考模式：不思考=咨询只显示；正常=把咨询提炼的检查清单注入每段写作；强思考=每段写前刷新检索 + 注入清单（更慢但更稳）。',
+    'Note: Agent generates TODO then executes step-by-step with live progress; prose is capped to ≤4000 chars (for review cost), usually costs more chars; Mode: None=consult shown only; Normal=inject consult checklist; Strong=refresh RAG before each segment + checklist (slower, steadier).'
+  )
 
   const agentProgress = document.createElement('div')
   agentProgress.className = 'ain-card'
@@ -4815,6 +5019,12 @@ async function openBootstrapDialog(ctx) {
         const targetChars = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
         const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         const wantAudit = !!cbAudit.checked
+        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
+        // 记住用户选择（但不强行改动“是否默认启用 Agent”）
+        try {
+          const curEnabled = !!(cfg && cfg.agent && cfg.agent.enabled)
+          cfg = await saveCfg(ctx, { agent: { enabled: curEnabled, targetChars, thinkingMode, audit: wantAudit } })
+        } catch {}
         try { agentProgress.style.display = '' } catch {}
         try { agentLog.textContent = t('Agent 执行中…', 'Agent running...') } catch {}
         out.textContent = t('Agent 执行中…（多轮）', 'Agent running... (multi-round)')
@@ -4830,7 +5040,7 @@ async function openBootstrapDialog(ctx) {
           progress: '',
           bible: '',
           rag: rag || null,
-          strongThinking: !!cbStrongThink.checked,
+          thinkingMode,
           targetChars,
           chunkCount,
           audit: wantAudit

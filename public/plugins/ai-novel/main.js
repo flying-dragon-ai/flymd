@@ -803,6 +803,86 @@ async function getPrevChapterTailText(ctx, cfg, maxChars) {
   }
 }
 
+async function findPrevChapterPath(ctx, cfg) {
+  // 目标：定位“上一章文件路径”，用于人物提取/状态展示等。
+  try {
+    if (!ctx || !cfg) return ''
+    const inf = await inferProjectDir(ctx, cfg)
+    if (!inf) return ''
+
+    const chapRoot = joinFsPath(inf.projectAbs, '03_章节')
+    const chapDir = await inferCurrentChapterDir(ctx, inf, chapRoot)
+    const filesAll = await listMarkdownFilesAny(ctx, chapRoot)
+    const files = (filesAll || []).filter((p) => fsDirName(p) === chapDir)
+    if (!files.length) return ''
+
+    let curPath = ''
+    try {
+      if (ctx.getCurrentFilePath) curPath = String(await ctx.getCurrentFilePath() || '')
+    } catch {}
+    const curBase = curPath ? fsBaseName(curPath) : ''
+
+    let curNo = 0
+    const m0 = /^(\d{3,})_/.exec(curBase)
+    if (m0 && m0[1]) {
+      const x = parseInt(m0[1], 10)
+      if (Number.isFinite(x)) curNo = x
+    }
+
+    // 优先取“当前章节号 - 1”；否则取目录里最大章节号（排除当前文件）
+    let targetNo = 0
+    if (curNo > 1) {
+      targetNo = curNo - 1
+    } else {
+      for (let i = 0; i < files.length; i++) {
+        const bn = fsBaseName(files[i] || '')
+        if (!bn) continue
+        const mm = /^(\d{3,})_/.exec(bn)
+        if (!mm || !mm[1]) continue
+        const n = parseInt(mm[1], 10)
+        if (!Number.isFinite(n) || n <= 0) continue
+        if (curBase && bn === curBase) continue
+        if (n > targetNo) targetNo = n
+      }
+    }
+
+    if (targetNo <= 0) {
+      // 新开卷的第一章：回退到“上一卷最后一章”
+      const curVolNo = parseVolumeNoFromDirName(fsBaseName(chapDir))
+      if (curVolNo > 1) {
+        const prevVolNo = curVolNo - 1
+        const chapRootAbs = normFsPath(chapRoot).replace(/\/+$/, '')
+        const prevDir = findVolumeDirByNo(filesAll, chapRoot, prevVolNo) || (prevVolNo === 1 ? chapRootAbs : '')
+        const fallbackPath = prevDir ? pickLastChapterPathInDir(filesAll, prevDir, '') : ''
+        return fallbackPath || ''
+      }
+      return ''
+    }
+
+    const pad = String(targetNo).padStart(3, '0')
+    for (let i = 0; i < files.length; i++) {
+      const bn = fsBaseName(files[i] || '')
+      if (bn && bn.startsWith(pad + '_')) return files[i]
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
+async function getPrevChapterTextForExtract(ctx, cfg, maxChars) {
+  // 人物提取更需要覆盖“开头+结尾”，避免只截尾导致漏角色
+  try {
+    const p = await findPrevChapterPath(ctx, cfg)
+    if (!p) return { path: '', text: '' }
+    const raw = await readTextAny(ctx, p)
+    const lim = Math.max(2000, (maxChars | 0) || 20000)
+    return { path: p, text: sliceHeadTail(String(raw || ''), lim, 0.55) }
+  } catch {
+    return { path: '', text: '' }
+  }
+}
+
 async function getPrevTextForRequest(ctx, cfg) {
   const lim = cfg && cfg.ctx && cfg.ctx.maxPrevChars ? (cfg.ctx.maxPrevChars | 0) : 8000
   const doc = String(ctx && ctx.getEditorValue ? (ctx.getEditorValue() || '') : '')
@@ -3182,6 +3262,253 @@ async function openWriteWithChoiceDialog(ctx) {
   )
   sec.appendChild(extra.wrap)
 
+  // 人物（上一章）——可选：提取上一章出场人物与状态，并注入到硬约束，避免“人被忘掉”
+  const _castState = { items: [] }
+
+  function normCastItem(x) {
+    const o = x && typeof x === 'object' ? x : {}
+    const name = safeText(o.name).trim()
+    const status = safeText(o.status).trim()
+    const plan = safeText(o.plan).trim()
+    const appear = o.appear == null ? true : !!o.appear
+    return { name, status, plan, appear }
+  }
+
+  function buildCastConstraintsText() {
+    const arr0 = Array.isArray(_castState.items) ? _castState.items : []
+    const seen = new Set()
+    const rows = []
+    for (let i = 0; i < arr0.length; i++) {
+      const it = normCastItem(arr0[i])
+      if (!it.name) continue
+      const key = it.name
+      if (seen.has(key)) continue
+      seen.add(key)
+      const parts = []
+      if (it.status) parts.push(t('上一章：', 'Prev: ') + it.status)
+      parts.push(t('下一章：', 'Next: ') + (it.appear ? t('出场', 'appear') : t('不出场', 'not appear')))
+      if (it.plan) parts.push(t('走向：', 'Arc: ') + it.plan)
+      rows.push('- ' + it.name + (parts.length ? ('：' + parts.join('；')) : ''))
+    }
+    if (!rows.length) return ''
+    return [
+      t('【人物走向（用户指定）】', '[Character steering (user)]'),
+      ...rows,
+      t('规则：勾选“出场”的人物，下一章至少出现一次或有一句话交代；未勾选但写了“走向”的，也需要一句话交代。', 'Rule: If marked appear, the character must show up or be mentioned at least once; if not appear but has an arc, add one-sentence update.')
+    ].join('\n')
+  }
+
+  const castCard = document.createElement('div')
+  castCard.className = 'ain-card'
+  castCard.style.marginTop = '10px'
+  castCard.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${t('人物（上一章）', 'Characters (prev chapter)')}</div>`
+  const castHint = document.createElement('div')
+  castHint.className = 'ain-muted'
+  castHint.textContent = t(
+    '可选：点“提取上一章”获取上一章出场人物与状态；勾选下一章是否出场，并可填写走向（可空）。这些内容会自动注入到“硬约束”，帮模型别忘人（不会写入文件）。',
+    'Optional: click Extract to get characters & status from prev chapter; choose whether they appear next and optionally add an arc. This will be injected into constraints (not written to files).'
+  )
+  castCard.appendChild(castHint)
+
+  const castTools = mkBtnRow()
+  const btnCastExtract = document.createElement('button')
+  btnCastExtract.className = 'ain-btn gray'
+  btnCastExtract.textContent = t('提取上一章', 'Extract prev')
+  const btnCastAdd = document.createElement('button')
+  btnCastAdd.className = 'ain-btn gray'
+  btnCastAdd.style.marginLeft = '8px'
+  btnCastAdd.textContent = t('添加人物', 'Add')
+  const btnCastClear = document.createElement('button')
+  btnCastClear.className = 'ain-btn gray'
+  btnCastClear.style.marginLeft = '8px'
+  btnCastClear.textContent = t('清空', 'Clear')
+  castTools.appendChild(btnCastExtract)
+  castTools.appendChild(btnCastAdd)
+  castTools.appendChild(btnCastClear)
+  castCard.appendChild(castTools)
+
+  const castStatus = document.createElement('div')
+  castStatus.className = 'ain-muted'
+  castStatus.style.marginTop = '6px'
+  castStatus.textContent = t('未提取。', 'Not extracted.')
+  castCard.appendChild(castStatus)
+
+  const castList = document.createElement('div')
+  castList.style.marginTop = '8px'
+  castCard.appendChild(castList)
+  sec.appendChild(castCard)
+
+  function renderCastList() {
+    castList.innerHTML = ''
+    const arr = Array.isArray(_castState.items) ? _castState.items : []
+    if (!arr.length) {
+      const empty = document.createElement('div')
+      empty.className = 'ain-muted'
+      empty.textContent = t('暂无人物：可点“提取上一章”或“添加人物”。', 'No characters: extract from prev or add manually.')
+      castList.appendChild(empty)
+      return
+    }
+
+    const head = document.createElement('div')
+    head.className = 'ain-muted'
+    head.textContent = t('格式：出场 / 人物名 / 上一章状态 / 下一章走向（可空）', 'Format: appear / name / prev status / next arc (optional)')
+    castList.appendChild(head)
+
+    for (let i = 0; i < arr.length; i++) {
+      const it = normCastItem(arr[i])
+      arr[i] = it
+
+      const row = document.createElement('div')
+      row.style.display = 'grid'
+      row.style.gridTemplateColumns = '70px 140px 1fr 1fr 60px'
+      row.style.gap = '8px'
+      row.style.alignItems = 'center'
+      row.style.marginTop = '8px'
+
+      const lab = document.createElement('label')
+      lab.className = 'ain-muted'
+      lab.style.display = 'flex'
+      lab.style.gap = '6px'
+      lab.style.alignItems = 'center'
+      const cb = document.createElement('input')
+      cb.type = 'checkbox'
+      cb.checked = !!it.appear
+      cb.onchange = () => { it.appear = !!cb.checked }
+      const sp = document.createElement('span')
+      sp.textContent = t('出场', 'Appear')
+      lab.appendChild(cb)
+      lab.appendChild(sp)
+
+      const inpName = document.createElement('input')
+      inpName.className = 'ain-in'
+      inpName.value = it.name
+      inpName.placeholder = t('人物名', 'Name')
+      inpName.oninput = () => { it.name = inpName.value }
+
+      const inpStatus = document.createElement('input')
+      inpStatus.className = 'ain-in'
+      inpStatus.value = it.status
+      inpStatus.placeholder = t('上一章状态（可空）', 'Prev status (optional)')
+      inpStatus.oninput = () => { it.status = inpStatus.value }
+
+      const inpPlan = document.createElement('input')
+      inpPlan.className = 'ain-in'
+      inpPlan.value = it.plan
+      inpPlan.placeholder = t('下一章走向（可空）', 'Next arc (optional)')
+      inpPlan.oninput = () => { it.plan = inpPlan.value }
+
+      const btnDel = document.createElement('button')
+      btnDel.className = 'ain-btn gray'
+      btnDel.textContent = t('删除', 'Del')
+      btnDel.onclick = () => {
+        try {
+          _castState.items = arr.filter((_, k) => k !== i)
+        } catch {
+          _castState.items = []
+        }
+        renderCastList()
+      }
+
+      row.appendChild(lab)
+      row.appendChild(inpName)
+      row.appendChild(inpStatus)
+      row.appendChild(inpPlan)
+      row.appendChild(btnDel)
+
+      castList.appendChild(row)
+    }
+  }
+
+  async function doExtractPrevCharacters() {
+    try {
+      cfg = await loadCfg(ctx)
+      setBusy(btnCastExtract, true)
+      castStatus.textContent = t('提取中…', 'Extracting...')
+
+      const lim = (cfg && cfg.ctx && cfg.ctx.maxUpdateSourceChars) ? (cfg.ctx.maxUpdateSourceChars | 0) : 20000
+      const prev = await getPrevChapterTextForExtract(ctx, cfg, lim)
+      if (!prev || !safeText(prev.text).trim()) {
+        throw new Error(t('未找到上一章正文：请先打开章节文件，或确认章节目录存在。', 'No previous chapter text: open a chapter file or check chapters folder.'))
+      }
+
+      const q = [
+        '任务：从【上一章正文】中提取“出场人物清单”，并给出每个人在上一章结束时的状态。',
+        '规则：',
+        '1) 只允许基于【上一章正文】的明确内容；不确定就留空或写“未知”。',
+        '2) 人名用原文写法；不要合并不同人；不要编造未出场人物。',
+        '3) 输出必须是 JSON 数组，且只输出 JSON（不要 ``` 代码块，不要解释）。',
+        '字段：name（必填，人物名）, status（可空，一句话：位置/伤势/关系/目标/当前处境）, note（可空：上一章主要行动一句话）。',
+        '数量：最多 30 个，按重要性/出场频率排序。',
+        '',
+        '【上一章文件】',
+        safeText(prev.path),
+        '',
+        '【上一章正文】',
+        safeText(prev.text)
+      ].join('\n')
+
+      const resp = await apiFetchConsultWithJob(ctx, cfg, {
+        upstream: {
+          baseUrl: cfg.upstream.baseUrl,
+          apiKey: cfg.upstream.apiKey,
+          model: cfg.upstream.model
+        },
+        input: {
+          question: q,
+          progress: '',
+          bible: '',
+          prev: '',
+        }
+      }, {
+        timeoutMs: 190000,
+        onTick: ({ waitMs }) => {
+          const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
+          castStatus.textContent = t('提取中… 已等待 ', 'Extracting... waited ') + s + 's'
+        }
+      })
+
+      const txt = safeText(resp && resp.text).trim()
+      const arr = tryParseOptionsDataFromText(txt) || []
+      if (!Array.isArray(arr)) throw new Error(t('人物提取输出无法解析为 JSON 数组', 'Cannot parse JSON array'))
+
+      const out = []
+      for (let i = 0; i < arr.length; i++) {
+        const it = arr[i] && typeof arr[i] === 'object' ? arr[i] : null
+        if (!it) continue
+        const name = safeText(it.name != null ? it.name : (it.character != null ? it.character : '')).trim()
+        if (!name) continue
+        const status = safeText(it.status != null ? it.status : (it.state != null ? it.state : '')).trim()
+        const note = safeText(it.note != null ? it.note : '').trim()
+        out.push({ name, status: status || note, plan: '', appear: true })
+      }
+
+      _castState.items = out
+      renderCastList()
+      castStatus.textContent = t('已提取人物：', 'Extracted: ') + String(out.length)
+      ctx.ui.notice(t('已提取上一章人物', 'Characters extracted'), 'ok', 1600)
+    } catch (e) {
+      castStatus.textContent = t('提取失败：', 'Extract failed: ') + (e && e.message ? e.message : String(e))
+    } finally {
+      setBusy(btnCastExtract, false)
+    }
+  }
+
+  btnCastExtract.onclick = () => { doExtractPrevCharacters().catch(() => {}) }
+  btnCastAdd.onclick = () => {
+    try {
+      _castState.items = (Array.isArray(_castState.items) ? _castState.items.slice(0) : [])
+      _castState.items.push({ name: '', status: '', plan: '', appear: true })
+    } catch {
+      _castState.items = [{ name: '', status: '', plan: '', appear: true }]
+    }
+    renderCastList()
+  }
+  btnCastClear.onclick = () => {
+    _castState.items = []
+    renderCastList()
+  }
+  renderCastList()
+
   const a0 = _ainAgentGetCfg(cfg)
   const agentBox = document.createElement('div')
   agentBox.style.marginTop = '8px'
@@ -3432,7 +3759,10 @@ async function openWriteWithChoiceDialog(ctx) {
   }
 
   function getLocalConstraintsText() {
-    return safeText(extra.ta.value).trim()
+    const base = safeText(extra.ta.value).trim()
+    const more = safeText(buildCastConstraintsText()).trim()
+    if (base && more) return base + '\n\n' + more
+    return base || more
   }
 
   function renderOptions() {

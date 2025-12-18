@@ -1735,7 +1735,7 @@ async function openSettingsDialog(ctx) {
 
   const secBackend = document.createElement('div')
   secBackend.className = 'ain-card'
-  secBackend.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${t('后端', 'Backend')}</div>`
+  secBackend.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${t('账户', 'Account')}</div>`
   const projHint = document.createElement('div')
   projHint.className = 'ain-muted'
   projHint.style.marginTop = '6px'
@@ -1759,13 +1759,30 @@ async function openSettingsDialog(ctx) {
   btnRegister.className = 'ain-btn gray'
   btnRegister.style.marginLeft = '8px'
   btnRegister.textContent = t('注册', 'Register')
+  const btnDocs = document.createElement('button')
+  btnDocs.className = 'ain-btn gray'
+  btnDocs.style.marginLeft = '8px'
+  btnDocs.textContent = t('使用文档', 'Docs')
   const btnMe = document.createElement('button')
   btnMe.className = 'ain-btn gray'
   btnMe.style.marginLeft = '8px'
   btnMe.textContent = t('刷新余额', 'Refresh billing')
+  const inpCard = document.createElement('input')
+  inpCard.className = 'ain-in'
+  inpCard.type = 'text'
+  inpCard.placeholder = t('充值卡号', 'Card token')
+  inpCard.style.width = '220px'
+  inpCard.style.marginLeft = '8px'
+  const btnRedeem = document.createElement('button')
+  btnRedeem.className = 'ain-btn gray'
+  btnRedeem.style.marginLeft = '8px'
+  btnRedeem.textContent = t('兑换', 'Redeem')
   btnRow.appendChild(btnLogin)
   btnRow.appendChild(btnRegister)
+  btnRow.appendChild(btnDocs)
   btnRow.appendChild(btnMe)
+  btnRow.appendChild(inpCard)
+  btnRow.appendChild(btnRedeem)
   secBackend.appendChild(btnRow)
 
   const billingBox = document.createElement('div')
@@ -1846,12 +1863,30 @@ async function openSettingsDialog(ctx) {
     }
   }
 
+  btnDocs.onclick = () => {
+    const url = 'https://www.llingfei.com/novel.html'
+    try { window.open(url, '_blank', 'noopener,noreferrer') } catch { try { location.href = url } catch {} }
+  }
+
   btnMe.onclick = async () => {
     try {
       await refreshBilling()
       ctx.ui.notice(t('已刷新', 'Refreshed'), 'ok', 1200)
     } catch (e) {
       ctx.ui.notice(t('读取失败：', 'Failed: ') + (e && e.message ? e.message : String(e)), 'err', 2400)
+    }
+  }
+
+  btnRedeem.onclick = async () => {
+    try {
+      cfg = await loadCfg(ctx)
+      const token = (inpCard.value || '').trim()
+      if (!token) throw new Error(t('请输入充值卡号', 'Please input card token'))
+      const json = await apiFetch(ctx, cfg, 'billing/redeem/', { token })
+      await refreshBilling()
+      ctx.ui.notice(t('兑换成功，增加字符：', 'Redeemed, chars +') + String(json.chars_grant || 0), 'ok', 2400)
+    } catch (e) {
+      ctx.ui.notice(t('兑换失败：', 'Redeem failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)
     }
   }
 
@@ -2119,26 +2154,6 @@ async function openSettingsDialog(ctx) {
   rowEmb2.appendChild(inpEmbModel.wrap)
   secEmb.appendChild(rowEmb2)
 
-  const secRecharge = document.createElement('div')
-  secRecharge.className = 'ain-card'
-  secRecharge.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${t('充值卡兑换', 'Recharge')}</div>`
-  const inpCard = mkInput(t('充值卡号', 'Card token'), '', 'text')
-  secRecharge.appendChild(inpCard.wrap)
-  const btnRedeem = document.createElement('button')
-  btnRedeem.className = 'ain-btn'
-  btnRedeem.textContent = t('兑换', 'Redeem')
-  btnRedeem.onclick = async () => {
-    try {
-      cfg = await loadCfg(ctx)
-      const json = await apiFetch(ctx, cfg, 'billing/redeem/', { token: inpCard.inp.value })
-      await refreshBilling()
-      ctx.ui.notice(t('兑换成功，增加字符：', 'Redeemed, chars +') + String(json.chars_grant || 0), 'ok', 2400)
-    } catch (e) {
-      ctx.ui.notice(t('兑换失败：', 'Redeem failed: ') + (e && e.message ? e.message : String(e)), 'err', 2600)
-    }
-  }
-  secRecharge.appendChild(btnRedeem)
-
   const secSave = document.createElement('div')
   secSave.className = 'ain-card'
   const btnSave = document.createElement('button')
@@ -2188,7 +2203,6 @@ async function openSettingsDialog(ctx) {
   body.appendChild(secCtx)
   body.appendChild(secAgent)
   body.appendChild(secEmb)
-  body.appendChild(secRecharge)
   body.appendChild(secSave)
 
   dlg.appendChild(head)

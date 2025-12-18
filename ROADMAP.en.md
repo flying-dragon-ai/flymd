@@ -2,6 +2,11 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.8.5
+- New: Drag a tab out of the window to open it in a new instance (only for saved tabs with no unsaved changes)
+- Improved: Wider edge trigger area to re-open the library sidebar after it’s hidden
+- Improved: Persist extension panel filters (Market: “Installed only”; Installed section: “Updates only”)
+
 ## Update v0.8.4
 - Fixed: In Excel/Sheets formulas, absolute refs like `$A$1` / `C$2` / `$U:$U` no longer falsely trigger Markdown inline math (KaTeX)
 

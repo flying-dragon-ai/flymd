@@ -53,7 +53,7 @@ const DEFAULT_CFG = {
   agent: {
     // Agent（Plan/TODO）模式：把一次写作拆成多轮执行，提高上限与一致性（代价：更耗字符/更慢）
     enabled: false,
-    // 写作字数目标（总字数）：为了审阅成本，最大只允许到 4000
+    // 写作字数目标（总字数）：目标值，不做硬截断（避免“超一点就被砍掉”）
     targetChars: 3000,
     // 思考模式（默认 none）：
     // - none：不思考（就是现在的 Agent：咨询只显示，不注入写作）
@@ -2244,7 +2244,8 @@ async function openSettingsDialog(ctx) {
       const a = cfg && cfg.agent ? cfg.agent : {}
       const v = a && (a.targetChars != null ? a.targetChars : (a.target_chars != null ? a.target_chars : null))
       const n = parseInt(String(v == null ? '' : v), 10)
-      if (n === 1000 || n === 2000 || n === 3000 || n === 4000) return n
+      if (n === 1000 || n === 2000 || n === 3000) return n
+      if (n === 4000) return 3000
     } catch {}
     // 兼容旧配置：chunkCount -> targetChars
     try {
@@ -2254,7 +2255,7 @@ async function openSettingsDialog(ctx) {
         if (c <= 1) return 1000
         if (c === 2) return 2000
         if (c === 3) return 3000
-        return 4000
+        return 3000
       }
     } catch {}
     return 3000
@@ -2274,7 +2275,6 @@ async function openSettingsDialog(ctx) {
       { value: '1000', label: t('≈ 1000 字', '≈ 1000 chars') },
       { value: '2000', label: t('≈ 2000 字', '≈ 2000 chars') },
       { value: '3000', label: t('≈ 3000 字', '≈ 3000 chars') },
-      { value: '4000', label: t('≈ 4000 字（上限）', '≈ 4000 chars (max)') },
     ],
     String(agentTarget0)
   )
@@ -2305,6 +2305,24 @@ async function openSettingsDialog(ctx) {
     agentMode0
   )
 
+  function syncAgentTargetByMode() {
+    const max = _ainAgentMaxTargetCharsByMode(selThinkingMode.sel.value)
+    try {
+      const opts = selAgentTarget.sel.querySelectorAll('option')
+      for (let i = 0; i < opts.length; i++) {
+        const v = parseInt(String(opts[i].value || '0'), 10) || 0
+        opts[i].disabled = v > max
+      }
+    } catch {}
+    const cur = parseInt(String(selAgentTarget.sel.value || '3000'), 10) || 3000
+    const next = _ainAgentClampTargetCharsByMode(selThinkingMode.sel.value, cur)
+    if (next !== cur) {
+      try { selAgentTarget.sel.value = String(next) } catch {}
+    }
+  }
+  try { selThinkingMode.sel.onchange = () => syncAgentTargetByMode() } catch {}
+  syncAgentTargetByMode()
+
   rowAgent.appendChild(selAgentTarget.wrap)
   rowAgent.appendChild(auditWrap)
   rowAgent.appendChild(selThinkingMode.wrap)
@@ -2314,8 +2332,8 @@ async function openSettingsDialog(ctx) {
   hintAgent.className = 'ain-muted'
   hintAgent.style.marginTop = '6px'
   hintAgent.textContent = t(
-    '提示：Agent 会先生成 TODO，再逐项执行；写作会按字数目标控制在 ≤4000 字（为了审阅成本），但会更耗字符余额、也更慢。“正常/强思考”会把咨询提炼的检查清单注入每段写作；强思考还会在每段写前刷新检索。',
-    'Note: Agent generates TODO then executes step-by-step; writing is capped to ≤4000 chars (for review cost), but it usually costs more chars and is slower. Normal/Strong inject the consult checklist into each segment; Strong also refreshes RAG before each segment.'
+    '提示：Agent 会先生成 TODO，再逐项执行；字数是“目标值”而不是硬上限（超出一点没关系）。思考模式：默认≈3000，中等≈2000，加强≈1000（越高越耗 token，甚至翻倍）。',
+    'Note: Agent generates TODO then executes step-by-step; the target is a guideline (not a hard cap). Targets: None≈3000, Normal≈2000, Strong≈1000 (higher costs more tokens, sometimes ~2x).'
   )
   secAgent.appendChild(hintAgent)
 
@@ -2368,7 +2386,10 @@ async function openSettingsDialog(ctx) {
         },
         agent: {
           enabled: !!cbAgent.checked,
-          targetChars: parseInt(String(selAgentTarget.sel.value || '3000'), 10) || 3000,
+          targetChars: _ainAgentClampTargetCharsByMode(
+            selThinkingMode.sel.value,
+            parseInt(String(selAgentTarget.sel.value || '3000'), 10) || 3000
+          ),
           thinkingMode: _ainAgentNormThinkingMode(selThinkingMode.sel.value) || 'none',
           audit: !!cbAudit.checked
         },
@@ -3228,22 +3249,8 @@ async function openWriteWithChoiceDialog(ctx) {
   modeLine.appendChild(selThinkingMode)
   agentBox.appendChild(modeLine)
 
-  function _choiceAgentMaxChars(thinkingMode) {
-    const m = _ainAgentNormThinkingMode(thinkingMode) || 'none'
-    if (m === 'strong') return 1000
-    if (m === 'normal') return 2000
-    return 3000
-  }
-
-  function _choiceAgentClampTargetChars(thinkingMode, targetChars) {
-    const n0 = parseInt(String(targetChars == null ? '' : targetChars), 10) || 3000
-    const n = (n0 === 1000 || n0 === 2000 || n0 === 3000) ? n0 : 3000
-    const max = _choiceAgentMaxChars(thinkingMode)
-    return Math.min(n, max)
-  }
-
   function _choiceAgentSyncTargetOptions() {
-    const max = _choiceAgentMaxChars(selThinkingMode.value)
+    const max = _ainAgentMaxTargetCharsByMode(selThinkingMode.value)
     try {
       const opts = selAgentTarget.querySelectorAll('option')
       for (let i = 0; i < opts.length; i++) {
@@ -3252,7 +3259,7 @@ async function openWriteWithChoiceDialog(ctx) {
       }
     } catch {}
     const cur = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
-    const next = _choiceAgentClampTargetChars(selThinkingMode.value, cur)
+    const next = _ainAgentClampTargetCharsByMode(selThinkingMode.value, cur)
     if (next !== cur) {
       try { selAgentTarget.value = String(next) } catch {}
     }
@@ -3263,8 +3270,8 @@ async function openWriteWithChoiceDialog(ctx) {
   const agentHint = document.createElement('div')
   agentHint.className = 'ain-muted'
   agentHint.textContent = t(
-    '提示：Agent 会先生成 Plan，再逐项执行；字数目标上限：默认≤3000，中等≤2000，加强≤1000（越高越耗 token，甚至翻倍）。中等/加强对模型能力要求很高，慎用。',
-    'Note: Agent generates a plan then executes step-by-step; max output: None≤3000, Normal≤2000, Strong≤1000 (higher costs more tokens, sometimes ~2x). Normal/Strong require a capable model.'
+    '提示：Agent 会先生成 Plan，再逐项执行；字数是“目标值”不是硬上限：默认≈3000，中等≈2000，加强≈1000（越高越耗 token，甚至翻倍）。中等/加强对模型能力要求很高，慎用。',
+    'Note: Agent generates a plan then executes step-by-step; targets (not hard caps): None≈3000, Normal≈2000, Strong≈1000 (higher costs more tokens, sometimes ~2x). Normal/Strong require a capable model.'
   )
   sec.appendChild(agentBox)
   sec.appendChild(agentHint)
@@ -3552,16 +3559,16 @@ async function openWriteWithChoiceDialog(ctx) {
     lastText = ''
     lastDraftId = ''
     try {
-      const agentEnabled = !!cbAgent.checked
-      if (agentEnabled) {
-        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
-        const targetChars0 = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
-        const targetChars = _choiceAgentClampTargetChars(thinkingMode, targetChars0)
-        if (targetChars !== targetChars0) {
-          try { selAgentTarget.value = String(targetChars) } catch {}
-          ctx.ui.notice(t('已按思考模式收紧字数上限：', 'Target capped by mode: ') + String(targetChars), 'ok', 1800)
-        }
-        const chunkCount = _ainAgentDeriveChunkCount(targetChars)
+        const agentEnabled = !!cbAgent.checked
+        if (agentEnabled) {
+          const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
+          const targetChars0 = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+          const targetChars = _ainAgentClampTargetCharsByMode(thinkingMode, targetChars0)
+          if (targetChars !== targetChars0) {
+            try { selAgentTarget.value = String(targetChars) } catch {}
+          ctx.ui.notice(t('已按思考模式收紧字数目标：', 'Target adjusted by mode: ') + String(targetChars), 'ok', 1800)
+          }
+          const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         const wantAudit = !!cbAudit.checked
         // 记住用户选择（但不强行改动“是否默认启用 Agent”）
         try {
@@ -3655,16 +3662,16 @@ async function openWriteWithChoiceDialog(ctx) {
     lastDraftId = ''
 
     try {
-      const agentEnabled = !!cbAgent.checked
-      if (agentEnabled) {
-        const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
-        const targetChars0 = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
-        const targetChars = _choiceAgentClampTargetChars(thinkingMode, targetChars0)
-        if (targetChars !== targetChars0) {
-          try { selAgentTarget.value = String(targetChars) } catch {}
-          ctx.ui.notice(t('已按思考模式收紧字数上限：', 'Target capped by mode: ') + String(targetChars), 'ok', 1800)
-        }
-        const chunkCount = _ainAgentDeriveChunkCount(targetChars)
+        const agentEnabled = !!cbAgent.checked
+        if (agentEnabled) {
+          const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
+          const targetChars0 = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+          const targetChars = _ainAgentClampTargetCharsByMode(thinkingMode, targetChars0)
+          if (targetChars !== targetChars0) {
+            try { selAgentTarget.value = String(targetChars) } catch {}
+          ctx.ui.notice(t('已按思考模式收紧字数目标：', 'Target adjusted by mode: ') + String(targetChars), 'ok', 1800)
+          }
+          const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         const wantAudit = !!cbAudit.checked
         // 记住用户选择（但不强行改动“是否默认启用 Agent”）
         try {
@@ -3957,28 +3964,40 @@ function _ainAgentExtractChecklistFromConsult(text, maxChars) {
   return s.slice(0, m).trimEnd()
 }
 
+function _ainAgentNormTargetChars(v, fallback) {
+  // 只保留 1k/2k/3k（历史上的 4k 统一压到 3k）
+  const n = parseInt(String(v == null ? '' : v), 10)
+  if (n === 1000 || n === 2000 || n === 3000) return n
+  if (n === 4000) return 3000
+  const fb = parseInt(String(fallback == null ? '' : fallback), 10)
+  return (fb === 1000 || fb === 2000 || fb === 3000) ? fb : 3000
+}
+
+function _ainAgentMaxTargetCharsByMode(thinkingMode) {
+  const m = _ainAgentNormThinkingMode(thinkingMode) || 'none'
+  if (m === 'strong') return 1000
+  if (m === 'normal') return 2000
+  return 3000
+}
+
+function _ainAgentClampTargetCharsByMode(thinkingMode, targetChars) {
+  const n = _ainAgentNormTargetChars(targetChars, 3000)
+  const max = _ainAgentMaxTargetCharsByMode(thinkingMode)
+  return Math.min(n, max)
+}
+
 function _ainAgentGetCfg(cfg) {
   const a = (cfg && cfg.agent && typeof cfg.agent === 'object') ? cfg.agent : {}
 
-  function normTarget(v, fallback) {
-    const n = parseInt(String(v == null ? '' : v), 10)
-    if (n === 1000 || n === 2000 || n === 3000 || n === 4000) return n
-    const fb = parseInt(String(fallback == null ? '' : fallback), 10)
-    return (fb === 1000 || fb === 2000 || fb === 3000 || fb === 4000) ? fb : 3000
-  }
-
   // 新配置：targetChars；旧配置：chunkCount（做个粗暴映射，避免“升级后全变默认值”）
-  let targetChars = normTarget(a.targetChars != null ? a.targetChars : (a.target_chars != null ? a.target_chars : null), 3000)
-  if (!(targetChars === 1000 || targetChars === 2000 || targetChars === 3000 || targetChars === 4000)) {
-    targetChars = 3000
-  }
+  let targetChars = _ainAgentNormTargetChars(a.targetChars != null ? a.targetChars : (a.target_chars != null ? a.target_chars : null), 3000)
   if (!(a.targetChars != null || a.target_chars != null) && a.chunkCount != null) {
     const c = parseInt(String(a.chunkCount), 10)
     if (Number.isFinite(c)) {
       if (c <= 1) targetChars = 1000
       else if (c === 2) targetChars = 2000
       else if (c === 3) targetChars = 3000
-      else targetChars = 4000
+      else targetChars = 3000
     }
   }
 
@@ -3987,6 +4006,9 @@ function _ainAgentGetCfg(cfg) {
     _ainAgentNormThinkingMode(a.thinkingMode != null ? a.thinkingMode : (a.thinking_mode != null ? a.thinking_mode : '')) ||
     (a.strongThinking || a.strong_thinking ? 'strong' : 'none')
   if (!(thinkingMode === 'none' || thinkingMode === 'normal' || thinkingMode === 'strong')) thinkingMode = 'none'
+
+  // 按思考模式收紧目标（避免“强思考还选 3000”导致成本爆炸）
+  targetChars = _ainAgentClampTargetCharsByMode(thinkingMode, targetChars)
 
   return {
     enabled: !!a.enabled,
@@ -3999,8 +4021,7 @@ function _ainAgentGetCfg(cfg) {
 }
 
 function _ainAgentDeriveChunkCount(targetChars) {
-  const t0 = parseInt(String(targetChars == null ? '' : targetChars), 10)
-  const t = (t0 === 1000 || t0 === 2000 || t0 === 3000 || t0 === 4000) ? t0 : 3000
+  const t = _ainAgentNormTargetChars(targetChars, 3000)
   // 目标字数越大，分段越多；但最多 3 段（避免把上下文挤爆，反而更容易断裂）
   if (t <= 1200) return 1
   if (t <= 2400) return 2
@@ -4066,8 +4087,7 @@ function _ainAgentNormalizePlanItem(raw, idx) {
 
 function buildFallbackAgentPlan(baseInstruction, targetChars, chunkCount, wantAudit) {
   const ins = safeText(baseInstruction).trim()
-  const t0 = parseInt(String(targetChars == null ? '' : targetChars), 10)
-  const t = (t0 === 1000 || t0 === 2000 || t0 === 3000 || t0 === 4000) ? t0 : 3000
+  const t = _ainAgentNormTargetChars(targetChars, 3000)
   const n = _clampInt(chunkCount != null ? chunkCount : _ainAgentDeriveChunkCount(t), 1, 3)
   const perChunk = Math.max(600, Math.floor(t / n))
   const plan = []
@@ -4134,13 +4154,13 @@ function _ainAgentValidatePlan(items, chunkCount, wantAudit) {
 }
 
 async function agentBuildPlan(ctx, cfg, base) {
-  const t0 = parseInt(String(base && base.targetChars != null ? base.targetChars : ''), 10)
-  const targetChars = (t0 === 1000 || t0 === 2000 || t0 === 3000 || t0 === 4000) ? t0 : 3000
+  let targetChars = _ainAgentNormTargetChars(base && base.targetChars != null ? base.targetChars : null, 3000)
   const chunkCount = _clampInt(base && base.chunkCount != null ? base.chunkCount : _ainAgentDeriveChunkCount(targetChars), 1, 3)
   const wantAudit = !!(base && base.audit)
   const thinkingMode =
     _ainAgentNormThinkingMode(base && base.thinkingMode) ||
     (base && base.strongThinking ? 'strong' : 'none')
+  targetChars = _ainAgentClampTargetCharsByMode(thinkingMode, targetChars)
   const strongThinking = thinkingMode === 'strong'
 
   try {
@@ -4190,13 +4210,12 @@ async function agentRunPlan(ctx, cfg, base, ui) {
     }
   }
 
-  const t0 = parseInt(String(base && base.targetChars != null ? base.targetChars : ''), 10)
-  const targetChars = (t0 === 1000 || t0 === 2000 || t0 === 3000 || t0 === 4000) ? t0 : 3000
-  const chunkCount = _clampInt(base && base.chunkCount != null ? base.chunkCount : _ainAgentDeriveChunkCount(targetChars), 1, 3)
-  const wantAudit = !!(base && base.audit)
   const thinkingMode =
     _ainAgentNormThinkingMode(base && base.thinkingMode) ||
     (base && base.strongThinking ? 'strong' : 'none')
+  const targetChars = _ainAgentClampTargetCharsByMode(thinkingMode, base && base.targetChars != null ? base.targetChars : null)
+  const chunkCount = _clampInt(base && base.chunkCount != null ? base.chunkCount : _ainAgentDeriveChunkCount(targetChars), 1, 3)
+  const wantAudit = !!(base && base.audit)
   const strongThinking = thinkingMode === 'strong'
   const injectChecklist = thinkingMode === 'normal' || thinkingMode === 'strong'
 
@@ -4346,11 +4365,6 @@ async function agentRunPlan(ctx, cfg, base, ui) {
         }
         it.status = 'done'
       } else if (it.type === 'write') {
-        if (draft.trim().length >= targetChars) {
-          it.status = 'skipped'
-          pushLog(t('跳过写作：已达到字数目标', 'Skip write: target reached'))
-          continue
-        }
         const instruction = safeText(it.instruction).trim() || safeText(base && base.instruction).trim()
         if (!instruction) throw new Error(t('instruction 为空', 'Empty instruction'))
         const prev = curPrev()
@@ -4358,9 +4372,12 @@ async function agentRunPlan(ctx, cfg, base, ui) {
         const bible = base && base.bible != null ? base.bible : ''
         const constraints = safeText(base && base.constraints).trim()
 
-        const rest = Math.max(0, targetChars - draft.trim().length)
+        const curLen = draft.trim().length
+        const rest = targetChars - curLen
         const perChunk = Math.max(600, Math.floor(targetChars / chunkCount))
-        const wantLen = Math.max(300, Math.min(perChunk, rest || perChunk))
+        const wantLen = rest > 0
+          ? Math.max(300, Math.min(perChunk, rest))
+          : Math.max(200, Math.min(perChunk, Math.floor(perChunk * 0.5)))
         const checklistBlock = (injectChecklist && consultChecklist) ? [
           '【写作检查清单（只用于约束写作，不要在正文中直接输出）】',
           consultChecklist,
@@ -4371,7 +4388,8 @@ async function agentRunPlan(ctx, cfg, base, ui) {
           '',
           checklistBlock,
           '',
-          `长度目标：本章总字数≈${targetChars}；本段尽量控制在 ≈${wantLen} 字（允许 ±15%），避免超长。`
+          `长度目标：本章总字数≈${targetChars}（目标值，允许略超）；本段尽量控制在 ≈${wantLen} 字（允许 ±15%）。`,
+          (rest <= 0 ? '提示：正文可能已接近/超过目标字数，本段请优先收束推进，避免灌水。' : '')
         ].filter(Boolean).join('\n')
 
         const r = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
@@ -4395,9 +4413,6 @@ async function agentRunPlan(ctx, cfg, base, ui) {
         const piece = safeText(r && r.text).trim()
         if (!piece) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
         draft = draft ? (draft.trimEnd() + '\n\n' + piece) : piece
-        if (draft.length > targetChars) {
-          draft = sliceNiceEnd(draft, targetChars)
-        }
         it.status = 'done'
         pushLog(t('写作完成：追加 ', 'Written: +') + String(piece.length) + t(' 字符', ' chars'))
       } else if (it.type === 'audit') {
@@ -4913,13 +4928,13 @@ async function openBootstrapDialog(ctx) {
   const selAgentTarget = document.createElement('select')
   selAgentTarget.className = 'ain-in ain-select'
   selAgentTarget.style.width = '180px'
-  ;[1000, 2000, 3000, 4000].forEach((n) => {
+  ;[1000, 2000, 3000].forEach((n) => {
     const op = document.createElement('option')
     op.value = String(n)
-    op.textContent = t('≈ ', '≈ ') + String(n) + t(' 字', ' chars') + (n === 4000 ? t('（上限）', ' (max)') : '')
+    op.textContent = t('≈ ', '≈ ') + String(n) + t(' 字', ' chars') + (n === 3000 ? t('（上限）', ' (max)') : '')
     selAgentTarget.appendChild(op)
   })
-  try { selAgentTarget.value = String(a0.targetChars || 3000) } catch {}
+  try { selAgentTarget.value = String(_ainAgentNormTargetChars(a0.targetChars || 3000, 3000)) } catch {}
   agentBox.appendChild(selAgentTarget)
 
   const auditLine = document.createElement('label')
@@ -4955,12 +4970,30 @@ async function openBootstrapDialog(ctx) {
   modeLine.appendChild(selThinkingMode)
   agentBox.appendChild(modeLine)
 
+  function _bootstrapSyncTargetOptions() {
+    const max = _ainAgentMaxTargetCharsByMode(selThinkingMode.value)
+    try {
+      const opts = selAgentTarget.querySelectorAll('option')
+      for (let i = 0; i < opts.length; i++) {
+        const v = parseInt(String(opts[i].value || '0'), 10) || 0
+        opts[i].disabled = v > max
+      }
+    } catch {}
+    const cur = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+    const next = _ainAgentClampTargetCharsByMode(selThinkingMode.value, cur)
+    if (next !== cur) {
+      try { selAgentTarget.value = String(next) } catch {}
+    }
+  }
+  selThinkingMode.onchange = () => { _bootstrapSyncTargetOptions() }
+  _bootstrapSyncTargetOptions()
+
   const agentHint = document.createElement('div')
   agentHint.className = 'ain-muted'
   agentHint.style.marginTop = '6px'
   agentHint.textContent = t(
-    '提示：Agent 会先生成 TODO，再逐项执行，并实时显示进度；正文会按字数目标控制在 ≤4000 字（为了审阅成本），通常更耗字符余额；思考模式：不思考=咨询只显示；正常=把咨询提炼的检查清单注入每段写作；强思考=每段写前刷新检索 + 注入清单（更慢但更稳）。',
-    'Note: Agent generates TODO then executes step-by-step with live progress; prose is capped to ≤4000 chars (for review cost), usually costs more chars; Mode: None=consult shown only; Normal=inject consult checklist; Strong=refresh RAG before each segment + checklist (slower, steadier).'
+    '提示：Agent 会先生成 TODO，再逐项执行，并实时显示进度；字数是“目标值”不是硬上限：默认≈3000，中等≈2000，加强≈1000（越高越耗字符余额）。',
+    'Note: Agent generates TODO then executes step-by-step with live progress; targets (not hard caps): None≈3000, Normal≈2000, Strong≈1000 (higher costs more tokens).'
   )
 
   const agentProgress = document.createElement('div')
@@ -5210,10 +5243,15 @@ async function openBootstrapDialog(ctx) {
 
       const agentEnabled = !!cbAgent.checked
       if (agentEnabled) {
-        const targetChars = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
-        const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         const wantAudit = !!cbAudit.checked
         const thinkingMode = _ainAgentNormThinkingMode(selThinkingMode.value) || 'none'
+        const targetChars0 = parseInt(String(selAgentTarget.value || '3000'), 10) || 3000
+        const targetChars = _ainAgentClampTargetCharsByMode(thinkingMode, targetChars0)
+        if (targetChars !== targetChars0) {
+          try { selAgentTarget.value = String(targetChars) } catch {}
+          ctx.ui.notice(t('已按思考模式收紧字数目标：', 'Target adjusted by mode: ') + String(targetChars), 'ok', 1800)
+        }
+        const chunkCount = _ainAgentDeriveChunkCount(targetChars)
         // 记住用户选择（但不强行改动“是否默认启用 Agent”）
         try {
           const curEnabled = !!(cfg && cfg.agent && cfg.agent.enabled)

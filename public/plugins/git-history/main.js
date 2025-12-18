@@ -125,7 +125,7 @@ function ensurePanel(context) {
   root.style.boxSizing = 'border-box'
   root.style.display = 'flex'
   root.style.flexDirection = 'column'
-  root.style.fontSize = '12px'
+  root.style.fontSize = '14px'
   root.style.color = dark ? '#e5e7eb' : '#0f172a'
   root.style.zIndex = '1200'
   root.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
@@ -142,7 +142,7 @@ function ensurePanel(context) {
   const title = doc.createElement('div')
   title.textContent = gitText('Git 版本管理', 'Git History')
   title.style.fontWeight = '600'
-  title.style.fontSize = '12px'
+  title.style.fontSize = '14px'
   title.style.color = dark ? '#e5e7eb' : '#111827'
 
   const headerBtns = doc.createElement('div')
@@ -152,7 +152,7 @@ function ensurePanel(context) {
 
   const themeBtn = doc.createElement('button')
   themeBtn.textContent = isPanelDark() ? gitText('日间', 'Light') : gitText('夜间', 'Dark')
-  themeBtn.style.fontSize = '11px'
+  themeBtn.style.fontSize = '13px'
   themeBtn.style.padding = '2px 6px'
   themeBtn.style.cursor = 'pointer'
   themeBtn.style.borderRadius = '6px'
@@ -170,7 +170,7 @@ function ensurePanel(context) {
 
   refreshBtn = doc.createElement('button')
   refreshBtn.textContent = gitText('刷新', 'Refresh')
-  refreshBtn.style.fontSize = '11px'
+  refreshBtn.style.fontSize = '13px'
   refreshBtn.style.padding = '2px 6px'
   refreshBtn.style.cursor = 'pointer'
   refreshBtn.style.borderRadius = '6px'
@@ -183,7 +183,7 @@ function ensurePanel(context) {
   closeBtn.title = '关闭'
   closeBtn.style.width = '20px'
   closeBtn.style.height = '20px'
-  closeBtn.style.fontSize = '12px'
+  closeBtn.style.fontSize = '14px'
   closeBtn.style.cursor = 'pointer'
   closeBtn.style.border = 'none'
   closeBtn.style.background = 'transparent'
@@ -213,7 +213,7 @@ function ensurePanel(context) {
   initRepoBtn = doc.createElement('button')
   initRepoBtn.textContent = gitText('在当前库初始化 Git 仓库', 'Initialize Git repository in current vault')
   initRepoBtn.style.width = '100%'
-  initRepoBtn.style.fontSize = '11px'
+  initRepoBtn.style.fontSize = '13px'
   initRepoBtn.style.padding = '4px 6px'
   initRepoBtn.style.cursor = 'pointer'
   initRepoBtn.style.borderRadius = '6px'
@@ -234,7 +234,7 @@ function ensurePanel(context) {
   const commitTitle = doc.createElement('div')
   commitTitle.textContent = gitText('创建快照（commit）', 'Create snapshot (commit)')
   commitTitle.style.fontWeight = '500'
-  commitTitle.style.fontSize = '11px'
+  commitTitle.style.fontSize = '13px'
   commitTitle.style.color = dark ? '#e5e7eb' : '#111827'
 
   commitMsgInput = doc.createElement('input')
@@ -242,7 +242,7 @@ function ensurePanel(context) {
   commitMsgInput.placeholder = gitText('本次修改的说明，例如：重写引言', 'Commit message, e.g. "Rewrite introduction"')
   commitMsgInput.style.width = '100%'
   commitMsgInput.style.boxSizing = 'border-box'
-  commitMsgInput.style.fontSize = '11px'
+  commitMsgInput.style.fontSize = '13px'
   commitMsgInput.style.padding = '4px 6px'
   commitMsgInput.style.borderRadius = '4px'
   commitMsgInput.style.border = dark ? '1px solid #374151' : '1px solid #d1d5db'
@@ -255,7 +255,7 @@ function ensurePanel(context) {
 
   commitScopeSelect = doc.createElement('select')
   commitScopeSelect.style.flex = '1'
-  commitScopeSelect.style.fontSize = '11px'
+  commitScopeSelect.style.fontSize = '13px'
   commitScopeSelect.style.borderRadius = '4px'
   commitScopeSelect.style.border = dark ? '1px solid #374151' : '1px solid #d1d5db'
   commitScopeSelect.style.background = dark ? '#111827' : '#ffffff'
@@ -272,7 +272,7 @@ function ensurePanel(context) {
 
   const commitBtn = doc.createElement('button')
   commitBtn.textContent = gitText('提交', 'Commit')
-  commitBtn.style.fontSize = '11px'
+  commitBtn.style.fontSize = '13px'
   commitBtn.style.padding = '2px 6px'
   commitBtn.style.cursor = 'pointer'
   commitBtn.style.borderRadius = '6px'
@@ -296,7 +296,7 @@ function ensurePanel(context) {
 
   const historyHeader = doc.createElement('div')
   historyHeader.textContent = gitText('当前文档历史', 'Current document history')
-  historyHeader.style.fontSize = '11px'
+  historyHeader.style.fontSize = '13px'
   historyHeader.style.padding = '4px 8px'
   historyHeader.style.borderBottom = dark ? '1px solid #1f2937' : '1px solid #e5e7eb'
   historyHeader.style.background = dark ? '#0b1120' : '#f9fafb'
@@ -325,12 +325,12 @@ function ensurePanel(context) {
 
   const diffTitle = doc.createElement('div')
   diffTitle.textContent = gitText('差异预览', 'Diff preview')
-  diffTitle.style.fontSize = '11px'
+  diffTitle.style.fontSize = '13px'
   diffTitle.style.color = dark ? '#e5e7eb' : '#111827'
 
   const diffExpandBtn = doc.createElement('button')
   diffExpandBtn.textContent = gitText('在工作区大窗查看', 'View diff in main workspace')
-  diffExpandBtn.style.fontSize = '10px'
+  diffExpandBtn.style.fontSize = '12px'
   diffExpandBtn.style.padding = '2px 6px'
   diffExpandBtn.style.cursor = 'pointer'
   diffExpandBtn.style.borderRadius = '4px'
@@ -353,7 +353,7 @@ function ensurePanel(context) {
   diffEl.style.borderTop = dark ? '1px solid #1f2937' : '1px solid #e5e7eb'
   diffEl.style.color = dark ? '#e5e7eb' : '#111827'
   diffEl.style.fontFamily = 'ui-monospace, Menlo, SFMono-Regular, Consolas, "Liberation Mono", "Courier New", monospace'
-  diffEl.style.fontSize = '11px'
+  diffEl.style.fontSize = '13px'
   diffEl.textContent = gitText('选择上方某个提交查看差异…', 'Select a commit above to view diff…')
 
   body.appendChild(historyHeader)
@@ -550,11 +550,11 @@ async function refreshHistory(context) {
 
       const title = document.createElement('div')
       title.textContent = item.summary || '(无说明)'
-      title.style.fontSize = '11px'
+      title.style.fontSize = '13px'
       title.style.color = isPanelDark() ? '#e5e7eb' : '#111827'
 
       const meta = document.createElement('div')
-      meta.style.fontSize = '10px'
+      meta.style.fontSize = '12px'
       meta.style.opacity = '0.75'
       meta.style.color = isPanelDark() ? '#9ca3af' : '#6b7280'
       const hashShort = item.hash ? String(item.hash).slice(0, 7) : ''
@@ -569,7 +569,7 @@ async function refreshHistory(context) {
 
       const rollbackBtn = document.createElement('button')
       rollbackBtn.textContent = '恢复为此版本'
-      rollbackBtn.style.fontSize = '10px'
+      rollbackBtn.style.fontSize = '12px'
       rollbackBtn.style.padding = '2px 6px'
       rollbackBtn.style.cursor = 'pointer'
       rollbackBtn.style.borderRadius = '4px'
@@ -698,7 +698,7 @@ function renderDiffLines(container, lines) {
     const row = document.createElement('div')
     row.textContent = line
     row.style.whiteSpace = 'pre'
-    row.style.fontSize = '11px'
+    row.style.fontSize = '13px'
     if (line.startsWith('@@')) {
       row.style.color = '#60a5fa'
     } else if (line.startsWith('+') && !line.startsWith('+++')) {
@@ -742,13 +742,13 @@ function ensureDiffOverlay() {
 
   const title = doc.createElement('div')
   title.textContent = gitText('差异预览（全屏）', 'Diff preview (fullscreen)')
-  title.style.fontSize = '12px'
+  title.style.fontSize = '14px'
   title.style.fontWeight = '600'
   title.style.color = dark ? '#e5e7eb' : '#111827'
 
   const closeBtn = doc.createElement('button')
   closeBtn.textContent = gitText('关闭', 'Close')
-  closeBtn.style.fontSize = '11px'
+  closeBtn.style.fontSize = '13px'
   closeBtn.style.padding = '2px 8px'
   closeBtn.style.cursor = 'pointer'
   closeBtn.style.borderRadius = '6px'
@@ -770,7 +770,7 @@ function ensureDiffOverlay() {
   const pre = doc.createElement('pre')
   pre.style.margin = '0'
   pre.style.fontFamily = 'ui-monospace, Menlo, SFMono-Regular, Consolas, "Liberation Mono", "Courier New", monospace'
-  pre.style.fontSize = '12px'
+  pre.style.fontSize = '14px'
   pre.style.background = 'transparent'
   pre.style.border = 'none'
 

@@ -20,7 +20,15 @@ const DEFAULT_CFG = {
   upstream: {
     baseUrl: '',
     apiKey: '',
-    model: 'deepseek-chat'
+    model: 'deepseek-chat',
+    // 可选：仅用于 Agent 的 plan/TODO 生成；为空则沿用 model
+    planModel: ''
+  },
+  // 可选：仅用于 Agent 的 plan/TODO 生成；任一字段为空则自动沿用 upstream 对应字段
+  planUpstream: {
+    baseUrl: '',
+    apiKey: '',
+    model: ''
   },
   embedding: {
     baseUrl: '',
@@ -92,6 +100,23 @@ async function loadCfg(ctx) {
     const raw = await ctx.storage.get(CFG_KEY)
     if (raw && typeof raw === 'object') {
       const out = { ...DEFAULT_CFG, ...raw }
+      // 关键：cfg 需要按“已知嵌套结构”做浅层深合并，否则加新字段会被旧对象整体覆盖掉
+      try {
+        const ru = raw.upstream && typeof raw.upstream === 'object' ? raw.upstream : {}
+        const rpu = raw.planUpstream && typeof raw.planUpstream === 'object' ? raw.planUpstream : {}
+        const re = raw.embedding && typeof raw.embedding === 'object' ? raw.embedding : {}
+        const rc = raw.ctx && typeof raw.ctx === 'object' ? raw.ctx : {}
+        const rr = raw.rag && typeof raw.rag === 'object' ? raw.rag : {}
+        const rcon = raw.constraints && typeof raw.constraints === 'object' ? raw.constraints : {}
+        const ra = raw.agent && typeof raw.agent === 'object' ? raw.agent : {}
+        out.upstream = { ...DEFAULT_CFG.upstream, ...ru }
+        out.planUpstream = { ...DEFAULT_CFG.planUpstream, ...rpu }
+        out.embedding = { ...DEFAULT_CFG.embedding, ...re }
+        out.ctx = { ...DEFAULT_CFG.ctx, ...rc }
+        out.rag = { ...DEFAULT_CFG.rag, ...rr }
+        out.constraints = { ...DEFAULT_CFG.constraints, ...rcon }
+        out.agent = { ...DEFAULT_CFG.agent, ...ra }
+      } catch {}
       // 后端地址强制内置（不在 UI 暴露）
       out.backendBaseUrl = DEFAULT_CFG.backendBaseUrl
       // 清理历史默认值：不要把旧的 flymd 代理地址塞回 UI
@@ -108,7 +133,18 @@ async function loadCfg(ctx) {
 
 async function saveCfg(ctx, patch) {
   const cur = await loadCfg(ctx)
-  const out = { ...cur, ...(patch || {}) }
+  const p = patch && typeof patch === 'object' ? patch : {}
+  const out = { ...cur, ...p }
+  // 与 loadCfg 对称：对已知嵌套结构做合并，避免 patch 覆盖掉其它字段
+  try {
+    if (p.upstream && typeof p.upstream === 'object') out.upstream = { ...(cur.upstream || {}), ...p.upstream }
+    if (p.planUpstream && typeof p.planUpstream === 'object') out.planUpstream = { ...(cur.planUpstream || {}), ...p.planUpstream }
+    if (p.embedding && typeof p.embedding === 'object') out.embedding = { ...(cur.embedding || {}), ...p.embedding }
+    if (p.ctx && typeof p.ctx === 'object') out.ctx = { ...(cur.ctx || {}), ...p.ctx }
+    if (p.rag && typeof p.rag === 'object') out.rag = { ...(cur.rag || {}), ...p.rag }
+    if (p.constraints && typeof p.constraints === 'object') out.constraints = { ...(cur.constraints || {}), ...p.constraints }
+    if (p.agent && typeof p.agent === 'object') out.agent = { ...(cur.agent || {}), ...p.agent }
+  } catch {}
   // 后端地址强制内置（不允许被保存覆盖）
   out.backendBaseUrl = DEFAULT_CFG.backendBaseUrl
   await ctx.storage.set(CFG_KEY, out)
@@ -2460,7 +2496,7 @@ async function openSettingsDialog(ctx) {
   cbAgent.type = 'checkbox'
   cbAgent.checked = !!(cfg.agent && cfg.agent.enabled)
   agentLine.appendChild(cbAgent)
-  agentLine.appendChild(document.createTextNode(t('启用 Agent：先生成 TODO，再逐项执行', 'Enable Agent: generate TODO then execute step-by-step')))
+  agentLine.appendChild(document.createTextNode(t('启用 Agent', 'Enable Agent ')))
   secAgent.appendChild(agentLine)
 
   const rowAgent = document.createElement('div')
@@ -2524,9 +2560,9 @@ async function openSettingsDialog(ctx) {
   const selThinkingMode = mkSelect(
     t('思考模式（Agent）', 'Thinking mode (Agent)'),
     [
-      { value: 'none', label: t('不思考（默认）：咨询只显示，不影响写作', 'None (default): consult is shown only') },
-      { value: 'normal', label: t('正常思考：注入咨询检查清单（更稳）', 'Normal: inject consult checklist (steadier)') },
-      { value: 'strong', label: t('强思考：每段写前刷新检索 + 注入清单（更慢）', 'Strong: refresh RAG before each segment + checklist (slower)') },
+      { value: 'none', label: t('正常', 'default') },
+      { value: 'normal', label: t('中等', 'Normal') },
+      { value: 'strong', label: t('加强', 'Strong') },
     ],
     agentMode0
   )
@@ -2553,6 +2589,30 @@ async function openSettingsDialog(ctx) {
   rowAgent.appendChild(auditWrap)
   rowAgent.appendChild(selThinkingMode.wrap)
   secAgent.appendChild(rowAgent)
+
+  const rowPlanModel = document.createElement('div')
+  rowPlanModel.className = 'ain-row'
+  const inpPlanModel = mkInput(
+    t('Plan 模型（可空=沿用 chat 模型）', 'Plan model (optional, empty = chat model)'),
+    cfg.upstream && cfg.upstream.planModel ? cfg.upstream.planModel : ''
+  )
+  rowPlanModel.appendChild(inpPlanModel.wrap)
+  secAgent.appendChild(rowPlanModel)
+
+  const rowPlanUp1 = document.createElement('div')
+  rowPlanUp1.className = 'ain-row'
+  const pu = (cfg && cfg.planUpstream && typeof cfg.planUpstream === 'object') ? cfg.planUpstream : {}
+  const inpPlanUpBase = mkInput(t('Plan BaseURL（可空=沿用 chat）', 'Plan BaseURL (optional, empty = chat)'), pu.baseUrl || '')
+  const inpPlanUpKey = mkInput(t('Plan ApiKey（可空=沿用 chat）', 'Plan ApiKey (optional, empty = chat)'), pu.apiKey || '', 'password')
+  rowPlanUp1.appendChild(inpPlanUpBase.wrap)
+  rowPlanUp1.appendChild(inpPlanUpKey.wrap)
+  secAgent.appendChild(rowPlanUp1)
+
+  const rowPlanUp2 = document.createElement('div')
+  rowPlanUp2.className = 'ain-row'
+  const inpPlanUpModel = mkInput(t('Plan 模型（上游配置）', 'Plan model (upstream override)'), pu.model || '')
+  rowPlanUp2.appendChild(inpPlanUpModel.wrap)
+  secAgent.appendChild(rowPlanUp2)
 
   const hintAgent = document.createElement('div')
   hintAgent.className = 'ain-muted'
@@ -2593,7 +2653,13 @@ async function openSettingsDialog(ctx) {
         upstream: {
           baseUrl: inpUpBase.inp.value,
           apiKey: inpUpKey.inp.value,
-          model: inpUpModel.inp.value
+          model: inpUpModel.inp.value,
+          planModel: inpPlanModel.inp.value
+        },
+        planUpstream: {
+          baseUrl: inpPlanUpBase.inp.value,
+          apiKey: inpPlanUpKey.inp.value,
+          model: inpPlanUpModel.inp.value
         },
         embedding: {
           baseUrl: inpEmbBase.inp.value,
@@ -4727,13 +4793,25 @@ async function agentBuildPlan(ctx, cfg, base) {
   const strongThinking = thinkingMode === 'strong'
 
   try {
+    const planModel = safeText(cfg && cfg.upstream && cfg.upstream.planModel).trim()
+    const pu = (cfg && cfg.planUpstream && typeof cfg.planUpstream === 'object') ? cfg.planUpstream : {}
+    const model =
+      safeText(pu.model).trim() ||
+      planModel ||
+      (cfg && cfg.upstream ? cfg.upstream.model : '')
+    const baseUrl =
+      safeText(pu.baseUrl).trim() ||
+      (cfg && cfg.upstream ? cfg.upstream.baseUrl : '')
+    const apiKey =
+      safeText(pu.apiKey).trim() ||
+      (cfg && cfg.upstream ? cfg.upstream.apiKey : '')
     const resp = await apiFetch(ctx, cfg, 'ai/proxy/chat/', {
       mode: 'novel',
       action: 'plan',
       upstream: {
-        baseUrl: cfg.upstream.baseUrl,
-        apiKey: cfg.upstream.apiKey,
-        model: cfg.upstream.model
+        baseUrl,
+        apiKey,
+        model
       },
       input: {
         instruction: safeText(base && base.instruction).trim(),

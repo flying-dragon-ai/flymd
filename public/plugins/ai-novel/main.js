@@ -1786,21 +1786,37 @@ async function rag_build_or_update_index(ctx, cfg, opts) {
     }
   }
 
-  // 批量 embedding（剩余未命中的块）
+  // 批量 embedding（剩余未命中的块）—— 并发优化：同时发 3 批请求
+  const concurrency = 3
   while (pos < totalNeed) {
     if (typeof o.onTick === 'function') {
       try { o.onTick({ done: pos, total: totalNeed }) } catch {}
     }
-    const batchIdx = needIdx.slice(pos, pos + batchSize)
-    const texts = batchIdx.map((idx) => '[' + String(finalChunks[idx].source || '') + ']\n' + String(finalChunks[idx].text || ''))
-    const vecs = await rag_embed_texts(ctx, cfg, texts, isVoyage ? 'document' : '')
-    for (let i = 0; i < vecs.length; i++) {
-      const idx = batchIdx[i]
-      const v = vecs[i]
-      if (!Array.isArray(v) || v.length !== dims) throw new Error(t('embedding 维度不一致', 'embedding dims mismatch'))
-      flat.set(v, idx * dims)
+    // 并发发送多批请求
+    const batchPromises = []
+    const batchIndices = []
+    for (let c = 0; c < concurrency && pos + c * batchSize < totalNeed; c++) {
+      const start = pos + c * batchSize
+      const batchIdx = needIdx.slice(start, start + batchSize)
+      if (!batchIdx.length) break
+      batchIndices.push(batchIdx)
+      const texts = batchIdx.map((idx) => '[' + String(finalChunks[idx].source || '') + ']\n' + String(finalChunks[idx].text || ''))
+      batchPromises.push(rag_embed_texts(ctx, cfg, texts, isVoyage ? 'document' : ''))
     }
-    pos += batchIdx.length
+    // 等待所有并发请求完成
+    const allVecs = await Promise.all(batchPromises)
+    // 合并结果
+    for (let b = 0; b < allVecs.length; b++) {
+      const vecs = allVecs[b]
+      const batchIdx = batchIndices[b]
+      for (let i = 0; i < vecs.length; i++) {
+        const idx = batchIdx[i]
+        const v = vecs[i]
+        if (!Array.isArray(v) || v.length !== dims) throw new Error(t('embedding 维度不一致', 'embedding dims mismatch'))
+        flat.set(v, idx * dims)
+      }
+    }
+    pos += batchIndices.reduce((sum, arr) => sum + arr.length, 0)
   }
   if (typeof o.onTick === 'function') {
     try { o.onTick({ done: totalNeed, total: totalNeed }) } catch {}
@@ -1960,7 +1976,10 @@ async function projectMarkerExists(ctx, projectAbs) {
 
 function closeDialog() {
   try {
-    if (__MINIBAR__ && __MINIBAR__.remove) __MINIBAR__.remove()
+    if (__MINIBAR__) {
+      if (typeof __MINIBAR__.__ainCleanup === 'function') __MINIBAR__.__ainCleanup()
+      if (__MINIBAR__.remove) __MINIBAR__.remove()
+    }
   } catch {}
   __MINIBAR__ = null
   __MINI__ = null
@@ -2055,7 +2074,10 @@ function _ainMinimizeToBar(title, restoreFn, closeFn) {
   if (!doc || !doc.body) return
 
   try {
-    if (__MINIBAR__ && __MINIBAR__.remove) __MINIBAR__.remove()
+    if (__MINIBAR__) {
+      if (typeof __MINIBAR__.__ainCleanup === 'function') __MINIBAR__.__ainCleanup()
+      if (__MINIBAR__.remove) __MINIBAR__.remove()
+    }
   } catch {}
   __MINIBAR__ = null
 
@@ -2076,7 +2098,12 @@ function _ainMinimizeToBar(title, restoreFn, closeFn) {
   btnMax.title = t('最大化', 'Maximize')
   btnMax.onclick = () => {
     try { if (typeof restoreFn === 'function') restoreFn() } catch {}
-    try { if (__MINIBAR__ && __MINIBAR__.remove) __MINIBAR__.remove() } catch {}
+    try {
+      if (__MINIBAR__) {
+        if (typeof __MINIBAR__.__ainCleanup === 'function') __MINIBAR__.__ainCleanup()
+        if (__MINIBAR__.remove) __MINIBAR__.remove()
+      }
+    } catch {}
     __MINIBAR__ = null
     __MINI__ = null
   }
@@ -2107,7 +2134,8 @@ function _ainMinimizeToBar(title, restoreFn, closeFn) {
     return Math.min(b, Math.max(a, n))
   }
 
-  bar.addEventListener('pointerdown', (e) => {
+  // 保存监听器引用，便于清理
+  const _onPointerDown = (e) => {
     try {
       if (!e || e.button !== 0) return
       if (e.target && e.target.closest && e.target.closest('button')) return
@@ -2124,8 +2152,8 @@ function _ainMinimizeToBar(title, restoreFn, closeFn) {
       bar.setPointerCapture(e.pointerId)
       e.preventDefault()
     } catch {}
-  })
-  bar.addEventListener('pointermove', (e) => {
+  }
+  const _onPointerMove = (e) => {
     if (!dragging) return
     const dx = e.clientX - startX
     const dy = e.clientY - startY
@@ -2137,10 +2165,23 @@ function _ainMinimizeToBar(title, restoreFn, closeFn) {
     const t = _clamp(baseT + dy, 0, Math.max(0, maxT))
     bar.style.left = Math.round(l) + 'px'
     bar.style.top = Math.round(t) + 'px'
-  })
-  function _stopDrag() { dragging = false }
+  }
+  const _stopDrag = () => { dragging = false }
+
+  bar.addEventListener('pointerdown', _onPointerDown)
+  bar.addEventListener('pointermove', _onPointerMove)
   bar.addEventListener('pointerup', _stopDrag)
   bar.addEventListener('pointercancel', _stopDrag)
+
+  // 清理函数：移除监听器
+  bar.__ainCleanup = () => {
+    try {
+      bar.removeEventListener('pointerdown', _onPointerDown)
+      bar.removeEventListener('pointermove', _onPointerMove)
+      bar.removeEventListener('pointerup', _stopDrag)
+      bar.removeEventListener('pointercancel', _stopDrag)
+    } catch {}
+  }
 
   __MINI__ = { title: String(title || ''), restore: restoreFn, close: closeFn }
 }

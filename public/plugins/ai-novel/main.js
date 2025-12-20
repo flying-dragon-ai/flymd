@@ -15,6 +15,9 @@ const API_FETCH_TIMEOUT_MS = 200000
 const LOW_BALANCE_WARN_CHARS = 50000
 const LOW_BALANCE_WARN_TEXT = '当前剩余字符不足5万，大文本场景写作可能失败或无响应'
 
+// 自动探测余额的最小间隔：避免频繁打开窗口时反复打后端
+const BILLING_PROBE_TTL_MS = 20000
+
 const DEFAULT_CFG = {
   // 后端地址：强制内置，不在设置里展示
   backendBaseUrl: 'https://flymd.nyc.mn/xiaoshuo',
@@ -83,6 +86,8 @@ let __DIALOG__ = null
 let __MINIBAR__ = null
 let __MINI__ = null
 let __LOW_BALANCE_WARN_SHOWN__ = false
+let __LAST_BILLING_PROBE_AT__ = 0
+let __BILLING_PROBE_INFLIGHT__ = false
 
 function detectLocale() {
   try {
@@ -2993,6 +2998,8 @@ async function openUsageLogsDialog(ctx) {
 function createDialogShell(title, onClose) {
   ensureDialogStyle()
   closeDialog()
+  // 打开任意窗口时自动探测一次余额（仅用于低余额常驻提醒；做了节流）
+  try { void probeLowBalanceWarnThrottled(__CTX__) } catch {}
 
   const overlay = document.createElement('div')
   overlay.className = 'ain-overlay'
@@ -6342,6 +6349,22 @@ async function probeLowBalanceWarn(ctx) {
     const b = json && json.billing ? json.billing : null
     if (!b) return
     maybeShowLowBalanceWarn(ctx, b.balance_chars)
+  } catch {}
+}
+
+async function probeLowBalanceWarnThrottled(ctx) {
+  try {
+    if (!ctx) return
+    const now = Date.now()
+    if (__BILLING_PROBE_INFLIGHT__) return
+    if (__LAST_BILLING_PROBE_AT__ && (now - __LAST_BILLING_PROBE_AT__) < BILLING_PROBE_TTL_MS) return
+    __LAST_BILLING_PROBE_AT__ = now
+    __BILLING_PROBE_INFLIGHT__ = true
+    try {
+      await probeLowBalanceWarn(ctx)
+    } finally {
+      __BILLING_PROBE_INFLIGHT__ = false
+    }
   } catch {}
 }
 

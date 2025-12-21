@@ -58,6 +58,24 @@ const DEFAULT_CFG = {
     chunkOverlap: 160,
     // 仅建议 macOS 遇到 forbidden path 时开启：把索引落到 AppLocalData（插件数据目录），避免 Documents 等路径被 fs scope 拦截。
     indexInAppLocalData: false,
+    // 子索引（长篇连贯性优化）：不改变“总索引”落盘，仅在检索时基于总索引做“范围召回”融合。
+    // 结构：最近窗口（N 章） + 当前卷 + 总索引兜底；只查少量最相关范围，避免“查遍所有历史子索引”的性能/成本灾难。
+    subIndex: {
+      enabled: true,
+      // 按卷子索引：卷目录约定为 03_章节/卷XX_*（插件命名）
+      volume: true,
+      // 最近窗口子索引：围绕当前章节向前取 N 章（不含当前章，避免把草稿/当前文档塞回上下文）
+      recentWindow: true,
+      recentWindowChapters: 20,
+      // 融合权重：相似度 * 权重
+      weightRecent: 1.0,
+      weightVolume: 0.85,
+      weightTotal: 0.45,
+      // 每个范围的最低命中数（满足下限后，再按总分补到 topK）
+      minRecent: 2,
+      minVolume: 2,
+      minTotal: 1,
+    },
     // 自动更新进度脉络：仅在“开始下一章/新开卷”时基于上一章触发（避免草稿片段/未采用内容污染进度）
     autoUpdateProgress: true
   },
@@ -117,6 +135,7 @@ async function loadCfg(ctx) {
         const re = raw.embedding && typeof raw.embedding === 'object' ? raw.embedding : {}
         const rc = raw.ctx && typeof raw.ctx === 'object' ? raw.ctx : {}
         const rr = raw.rag && typeof raw.rag === 'object' ? raw.rag : {}
+        const rrs = rr.subIndex && typeof rr.subIndex === 'object' ? rr.subIndex : {}
         const rcon = raw.constraints && typeof raw.constraints === 'object' ? raw.constraints : {}
         const ra = raw.agent && typeof raw.agent === 'object' ? raw.agent : {}
         out.upstream = { ...DEFAULT_CFG.upstream, ...ru }
@@ -124,6 +143,8 @@ async function loadCfg(ctx) {
         out.embedding = { ...DEFAULT_CFG.embedding, ...re }
         out.ctx = { ...DEFAULT_CFG.ctx, ...rc }
         out.rag = { ...DEFAULT_CFG.rag, ...rr }
+        // rag.subIndex 需要再深合并一层：否则用户只改一个字段会把默认字段整个覆盖掉
+        out.rag.subIndex = { ...(DEFAULT_CFG.rag.subIndex || {}), ...rrs }
         out.constraints = { ...DEFAULT_CFG.constraints, ...rcon }
         out.agent = { ...DEFAULT_CFG.agent, ...ra }
       } catch {}
@@ -159,7 +180,10 @@ async function saveCfg(ctx, patch) {
     if (p.planUpstream && typeof p.planUpstream === 'object') out.planUpstream = { ...(cur.planUpstream || {}), ...p.planUpstream }
     if (p.embedding && typeof p.embedding === 'object') out.embedding = { ...(cur.embedding || {}), ...p.embedding }
     if (p.ctx && typeof p.ctx === 'object') out.ctx = { ...(cur.ctx || {}), ...p.ctx }
-    if (p.rag && typeof p.rag === 'object') out.rag = { ...(cur.rag || {}), ...p.rag }
+    if (p.rag && typeof p.rag === 'object') {
+      out.rag = { ...(cur.rag || {}), ...p.rag }
+      if (p.rag.subIndex && typeof p.rag.subIndex === 'object') out.rag.subIndex = { ...((cur.rag && cur.rag.subIndex) || {}), ...p.rag.subIndex }
+    }
     if (p.constraints && typeof p.constraints === 'object') out.constraints = { ...(cur.constraints || {}), ...p.constraints }
     if (p.agent && typeof p.agent === 'object') out.agent = { ...(cur.agent || {}), ...p.agent }
   } catch {}
@@ -1852,6 +1876,192 @@ async function rag_build_or_update_index(ctx, cfg, opts) {
   return { projectAbs, index: meta, vectors: flat }
 }
 
+// 子索引（范围召回）缓存：基于“总索引 meta”构建 source->chunkIndices / 章节列表 / 卷映射，避免每次检索都全量扫元数据做分组。
+let __AIN_RAG_SCOPE_CACHE__ = { key: '', bySource: new Map(), chapterRels: [], volumeToChapters: new Map() }
+
+function rag_parse_chapter_rel(rel) {
+  const p = String(rel || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  if (!p.startsWith('03_章节/')) return null
+  const parts = p.split('/')
+  if (parts.length < 3) return null
+  const volume = String(parts[1] || '').trim()
+  if (!volume) return null
+  const base = String(parts[parts.length - 1] || '').trim()
+  const m = /^(\d{1,4})_/.exec(base)
+  if (!m) return null
+  const cNo = parseInt(m[1], 10)
+  if (!Number.isFinite(cNo) || cNo < 0) return null
+  const m2 = /^卷(\d{1,4})_/.exec(volume)
+  const vOrder = m2 ? parseInt(m2[1], 10) : 0
+  const vDir = '03_章节/' + volume
+  return { vDir, vOrder, cNo, rel: p }
+}
+
+function rag_chapter_cmp(a, b) {
+  if (!a || !b) return 0
+  const av = a.vOrder | 0
+  const bv = b.vOrder | 0
+  if (av !== bv) return av - bv
+  const ad = String(a.vDir || '')
+  const bd = String(b.vDir || '')
+  if (ad !== bd) return ad.localeCompare(bd)
+  const ac = a.cNo | 0
+  const bc = b.cNo | 0
+  if (ac !== bc) return ac - bc
+  return String(a.rel || '').localeCompare(String(b.rel || ''))
+}
+
+function rag_prepare_scope_cache(meta) {
+  try {
+    const files = (meta && meta.files && typeof meta.files === 'object') ? meta.files : {}
+    const chunks = (meta && Array.isArray(meta.chunks)) ? meta.chunks : []
+    const key = String(meta && meta.updated_at != null ? meta.updated_at : '') + '|' + String(chunks.length) + '|' + String(Object.keys(files).length)
+    if (__AIN_RAG_SCOPE_CACHE__ && __AIN_RAG_SCOPE_CACHE__.key === key) return __AIN_RAG_SCOPE_CACHE__
+
+    const bySource = new Map()
+    for (let i = 0; i < chunks.length; i++) {
+      const it = chunks[i]
+      if (!it) continue
+      const src = safeText(it.source).trim()
+      if (!src) continue
+      let arr = bySource.get(src)
+      if (!arr) { arr = []; bySource.set(src, arr) }
+      arr.push(i)
+    }
+
+    const rels = Object.keys(files)
+    const chapterInfos = []
+    const volumeToChapters = new Map()
+    for (let i = 0; i < rels.length; i++) {
+      const info = rag_parse_chapter_rel(rels[i])
+      if (!info) continue
+      chapterInfos.push(info)
+      let arr = volumeToChapters.get(info.vDir)
+      if (!arr) { arr = []; volumeToChapters.set(info.vDir, arr) }
+      arr.push(info)
+    }
+    chapterInfos.sort(rag_chapter_cmp)
+    for (const [k, arr] of volumeToChapters.entries()) {
+      arr.sort(rag_chapter_cmp)
+      volumeToChapters.set(k, arr)
+    }
+
+    __AIN_RAG_SCOPE_CACHE__ = {
+      key,
+      bySource,
+      chapterRels: chapterInfos.map((x) => x.rel),
+      volumeToChapters,
+    }
+    return __AIN_RAG_SCOPE_CACHE__
+  } catch {
+    return __AIN_RAG_SCOPE_CACHE__
+  }
+}
+
+async function rag_try_get_current_rel(ctx, projectAbs) {
+  try {
+    if (!ctx || typeof ctx.getCurrentFilePath !== 'function') return ''
+    const curAbs = await ctx.getCurrentFilePath()
+    if (!curAbs) return ''
+    const root = normFsPath(projectAbs).replace(/\/+$/, '')
+    const p = normFsPath(curAbs)
+    if (!p.startsWith(root)) return ''
+    return p.slice(root.length).replace(/^\/+/, '')
+  } catch {
+    return ''
+  }
+}
+
+function rag_topk_insert(bestAsc, item, limit) {
+  if (!bestAsc || limit <= 0) return
+  if (bestAsc.length < limit) {
+    bestAsc.push(item)
+    if (bestAsc.length === limit) bestAsc.sort((a, b) => a.s - b.s)
+    return
+  }
+  if (!bestAsc.length) return
+  if (item.s <= bestAsc[0].s) return
+  bestAsc[0] = item
+  // 维护升序：把新的 bestAsc[0] 往后冒泡到合适位置（limit 很小，O(limit) 足够）
+  for (let i = 0; i < bestAsc.length - 1; i++) {
+    if (bestAsc[i].s <= bestAsc[i + 1].s) break
+    const tmp = bestAsc[i]
+    bestAsc[i] = bestAsc[i + 1]
+    bestAsc[i + 1] = tmp
+  }
+}
+
+function rag_collect_topk_from_chunk_indices(meta, vectors, dims, qVec, qNorm, chunkIndices, limit, weight) {
+  const bestAsc = []
+  const chunks = meta && Array.isArray(meta.chunks) ? meta.chunks : []
+  const w = Number.isFinite(weight) ? weight : 1
+
+  function cosineScoreAt(vs, off, query, d, queryNorm) {
+    let dot = 0
+    let vv = 0
+    const base = off | 0
+    for (let i = 0; i < d; i++) {
+      const v = vs[base + i]
+      dot += v * query[i]
+      vv += v * v
+    }
+    const denom = Math.sqrt(vv) * queryNorm
+    if (!denom) return 0
+    return dot / denom
+  }
+
+  const arr = Array.isArray(chunkIndices) ? chunkIndices : []
+  for (let i = 0; i < arr.length; i++) {
+    const idx = arr[i] | 0
+    if (idx < 0 || idx >= chunks.length) continue
+    const it = chunks[idx]
+    if (!it) continue
+    const off = it.vector_offset != null ? (it.vector_offset | 0) : -1
+    if (off < 0 || off + dims > vectors.length) continue
+    const s0 = cosineScoreAt(vectors, off, qVec, dims, qNorm)
+    if (s0 <= 0) continue
+    const s = s0 * w
+    rag_topk_insert(bestAsc, { s, it }, limit)
+  }
+
+  bestAsc.sort((a, b) => b.s - a.s)
+  return bestAsc
+}
+
+function rag_collect_topk_from_all_chunks(meta, vectors, dims, qVec, qNorm, limit, weight) {
+  const bestAsc = []
+  const chunks = meta && Array.isArray(meta.chunks) ? meta.chunks : []
+  const w = Number.isFinite(weight) ? weight : 1
+
+  function cosineScoreAt(vs, off, query, d, queryNorm) {
+    let dot = 0
+    let vv = 0
+    const base = off | 0
+    for (let i = 0; i < d; i++) {
+      const v = vs[base + i]
+      dot += v * query[i]
+      vv += v * v
+    }
+    const denom = Math.sqrt(vv) * queryNorm
+    if (!denom) return 0
+    return dot / denom
+  }
+
+  for (let i = 0; i < chunks.length; i++) {
+    const it = chunks[i]
+    if (!it) continue
+    const off = it.vector_offset != null ? (it.vector_offset | 0) : -1
+    if (off < 0 || off + dims > vectors.length) continue
+    const s0 = cosineScoreAt(vectors, off, qVec, dims, qNorm)
+    if (s0 <= 0) continue
+    const s = s0 * w
+    rag_topk_insert(bestAsc, { s, it }, limit)
+  }
+
+  bestAsc.sort((a, b) => b.s - a.s)
+  return bestAsc
+}
+
 async function rag_get_hits(ctx, cfg, queryText, opts) {
   const o = opts || {}
   const ragCfg = cfg && cfg.rag ? cfg.rag : {}
@@ -1890,47 +2100,120 @@ async function rag_get_hits(ctx, cfg, queryText, opts) {
   qNorm = Math.sqrt(qNorm)
   if (!qNorm) return null
 
-  function cosineScoreAt(vs, off, query, d, queryNorm) {
-    let dot = 0
-    let vv = 0
-    const base = off | 0
-    for (let i = 0; i < d; i++) {
-      const v = vs[base + i]
-      dot += v * query[i]
-      vv += v * v
-    }
-    const denom = Math.sqrt(vv) * queryNorm
-    if (!denom) return 0
-    return dot / denom
-  }
-
-  const scored = []
-  for (let i = 0; i < meta.chunks.length; i++) {
-    const it = meta.chunks[i]
-    if (!it) continue
-    const off = it.vector_offset != null ? (it.vector_offset | 0) : -1
-    if (off < 0 || off + dims > vectors.length) continue
-    const s = cosineScoreAt(vectors, off, qVec, dims, qNorm)
-    if (s <= 0) continue
-    scored.push({ s, it })
-  }
-  scored.sort((a, b) => b.s - a.s)
-
   const topK = Math.max(1, (o.topK != null ? (o.topK | 0) : ((ragCfg.topK | 0) || 6)))
   const maxChars = Math.max(400, (o.maxChars != null ? (o.maxChars | 0) : ((ragCfg.maxChars | 0) || 2400)))
   const hitMaxChars = Math.max(200, (o.hitMaxChars != null ? (o.hitMaxChars | 0) : 1200))
-  const hits = []
-  let used = 0
-  for (let i = 0; i < scored.length && hits.length < topK; i++) {
-    const it = scored[i].it
-    const src = safeText(it.source).trim() || 'unknown'
-    const txt = safeText(it.text).trim()
-    if (!txt) continue
-    const cut = txt.length > hitMaxChars ? (txt.slice(0, hitMaxChars) + '…') : txt
-    if (used + cut.length > maxChars) break
-    used += cut.length
-    hits.push({ source: src, text: cut })
+
+  // 子索引融合：最近窗口（N 章） + 当前卷 + 总索引兜底
+  const sub = (ragCfg.subIndex && typeof ragCfg.subIndex === 'object') ? ragCfg.subIndex : null
+  const subEnabled = !!(sub && sub.enabled !== false)
+  const cache = rag_prepare_scope_cache(meta)
+
+  let recentFiles = []
+  let volumeFiles = []
+  if (subEnabled && cache && Array.isArray(cache.chapterRels) && cache.chapterRels.length) {
+    const curRel = await rag_try_get_current_rel(ctx, projectAbs)
+    const curInfo = rag_parse_chapter_rel(curRel)
+    if (curInfo) {
+      // 当前卷文件列表
+      if (sub.volume !== false && cache.volumeToChapters && cache.volumeToChapters.has(curInfo.vDir)) {
+        const arr = cache.volumeToChapters.get(curInfo.vDir) || []
+        volumeFiles = arr.map((x) => x.rel)
+      }
+      // 最近窗口（向前 N 章，不含当前章）
+      if (sub.recentWindow !== false) {
+        const idx = cache.chapterRels.indexOf(curInfo.rel)
+        if (idx > 0) {
+          const n = Math.max(0, (sub.recentWindowChapters | 0) || 20)
+          const start = Math.max(0, idx - n)
+          recentFiles = cache.chapterRels.slice(start, idx)
+        }
+      }
+    }
   }
+
+  const wRecent = subEnabled ? (Number(sub.weightRecent) || 1.0) : 1.0
+  const wVolume = subEnabled ? (Number(sub.weightVolume) || 0.85) : 1.0
+  const wTotal = subEnabled ? (Number(sub.weightTotal) || 0.45) : 1.0
+
+  const minRecent = (subEnabled && recentFiles.length) ? Math.max(0, (sub.minRecent | 0) || 0) : 0
+  const minVolume = (subEnabled && volumeFiles.length) ? Math.max(0, (sub.minVolume | 0) || 0) : 0
+  const minTotal = subEnabled ? Math.max(0, (sub.minTotal | 0) || 0) : 0
+
+  const capRecent = Math.max(minRecent, topK) + 6
+  const capVolume = Math.max(minVolume, topK) + 6
+  const capTotal = Math.max(minTotal, topK) + 6
+
+  function collectByFiles(fileRels, cap, weight) {
+    const bySource = cache && cache.bySource ? cache.bySource : null
+    if (!bySource || !fileRels || !fileRels.length) return []
+    const idxs = []
+    for (let i = 0; i < fileRels.length; i++) {
+      const rel = String(fileRels[i] || '').trim()
+      if (!rel) continue
+      const arr = bySource.get(rel)
+      if (!arr || !arr.length) continue
+      // 直接追加：同一个 rel 的 chunkIndices 不会与其它 rel 重复
+      for (let j = 0; j < arr.length; j++) idxs.push(arr[j])
+    }
+    if (!idxs.length) return []
+    return rag_collect_topk_from_chunk_indices(meta, vectors, dims, qVec, qNorm, idxs, cap, weight)
+  }
+
+  const candRecent = subEnabled ? collectByFiles(recentFiles, capRecent, wRecent) : []
+  const candVolume = subEnabled ? collectByFiles(volumeFiles, capVolume, wVolume) : []
+  const candTotal = rag_collect_topk_from_all_chunks(meta, vectors, dims, qVec, qNorm, capTotal, wTotal)
+
+  const hits = []
+  const seen = new Set()
+  let used = 0
+
+  function pushCandList(list, takeMin) {
+    if (!list || !list.length || takeMin <= 0) return
+    for (let i = 0; i < list.length && hits.length < topK && takeMin > 0; i++) {
+      const it = list[i].it
+      const src = safeText(it.source).trim() || 'unknown'
+      const txt = safeText(it.text).trim()
+      if (!txt) continue
+      const cut = txt.length > hitMaxChars ? (txt.slice(0, hitMaxChars) + '…') : txt
+      const key = src + '\n' + cut
+      if (seen.has(key)) continue
+      if (used + cut.length > maxChars) continue
+      used += cut.length
+      seen.add(key)
+      hits.push({ source: src, text: cut })
+      takeMin--
+    }
+  }
+
+  // 先满足“范围下限”：最近窗口 > 当前卷 > 总索引
+  pushCandList(candRecent, minRecent)
+  pushCandList(candVolume, minVolume)
+  pushCandList(candTotal, minTotal)
+
+  // 再按总分补齐：把剩余候选合并排序（只合并小候选集，不会爆内存）
+  if (hits.length < topK) {
+    const pool = []
+    for (let i = 0; i < candRecent.length; i++) pool.push(candRecent[i])
+    for (let i = 0; i < candVolume.length; i++) pool.push(candVolume[i])
+    for (let i = 0; i < candTotal.length; i++) pool.push(candTotal[i])
+    pool.sort((a, b) => b.s - a.s)
+
+    for (let i = 0; i < pool.length && hits.length < topK; i++) {
+      const it = pool[i].it
+      const src = safeText(it.source).trim() || 'unknown'
+      const txt = safeText(it.text).trim()
+      if (!txt) continue
+      const cut = txt.length > hitMaxChars ? (txt.slice(0, hitMaxChars) + '…') : txt
+      const key = src + '\n' + cut
+      if (seen.has(key)) continue
+      if (used + cut.length > maxChars) continue
+      used += cut.length
+      seen.add(key)
+      hits.push({ source: src, text: cut })
+    }
+  }
+
   return hits.length ? hits : null
 }
 

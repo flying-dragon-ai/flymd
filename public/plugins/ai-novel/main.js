@@ -7348,6 +7348,46 @@ async function _ainTryReplaceFirstLineInPath(ctx, absPath, expectedLine, nextLin
   }
 }
 
+async function _ainTryInsertNoteAfterFirstLineInPath(ctx, absPath, noteLine) {
+  try {
+    const p = String(absPath || '').trim()
+    if (!p) return false
+    const note = safeText(noteLine).trimEnd()
+    if (!note) return false
+    const key = '自动脉络未写入文件'
+
+    let curPath = ''
+    try {
+      if (ctx && typeof ctx.getCurrentFilePath === 'function') curPath = String(await ctx.getCurrentFilePath() || '')
+    } catch {}
+    const isCurrent = !!(curPath && normFsPath(curPath) === normFsPath(p))
+
+    const raw = isCurrent
+      ? safeText(ctx && ctx.getEditorValue ? (ctx.getEditorValue() || '') : '')
+      : safeText(await readTextAny(ctx, p))
+
+    if (!raw) return false
+    if (raw.includes(key)) return false
+
+    const m = /^([^\r\n]*)(\r?\n|$)/.exec(raw)
+    const firstLine = m && m[1] != null ? String(m[1]) : ''
+    const eol = m && m[2] != null ? String(m[2]) : '\n'
+    const headLen = m ? String(m[0] || '').length : 0
+    let rest = raw.slice(Math.max(0, headLen))
+    rest = rest.replace(/^\r?\n+/, '')
+
+    const inserted = (firstLine + (eol || '\n') + (eol || '\n') + '> ' + note + (eol || '\n') + (eol || '\n') + rest).trimEnd() + (eol || '\n')
+
+    if (isCurrent && ctx && typeof ctx.setEditorValue === 'function') {
+      try { ctx.setEditorValue(inserted) } catch {}
+    }
+    await writeTextAny(ctx, p, inserted)
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function novel_create_next_chapter(ctx) {
   const cfg = await loadCfg(ctx)
   const inf = await computeNextChapterPath(ctx, cfg)
@@ -7407,8 +7447,10 @@ async function novel_create_next_chapter(ctx) {
     } else if (pr && pr.ok && !pr.updated) {
       if (pr.why === 'already') {
         try { ctx.ui.notice(t('进度脉络未更新：该来源章节已更新过', 'Progress not updated: already updated for this source'), 'ok', 1800) } catch {}
+        try { await _ainTryInsertNoteAfterFirstLineInPath(ctx, inf.chapPath, '自动脉络未写入文件，原因：已更新。请手动检查/更新确认。') } catch {}
       } else if (pr.why === 'empty') {
         try { ctx.ui.notice(t('进度脉络未更新：上游返回空（可能是模型/拒答/截断）', 'Progress not updated: upstream returned empty'), 'err', 2600) } catch {}
+        try { await _ainTryInsertNoteAfterFirstLineInPath(ctx, inf.chapPath, '自动脉络未写入文件，原因：上游返回为空。请手动检查/更新确认。') } catch {}
       }
     }
   }
@@ -7480,8 +7522,10 @@ async function novel_create_next_volume(ctx) {
     } else if (pr && pr.ok && !pr.updated) {
       if (pr.why === 'already') {
         try { ctx.ui.notice(t('进度脉络未更新：该来源章节已更新过', 'Progress not updated: already updated for this source'), 'ok', 1800) } catch {}
+        try { await _ainTryInsertNoteAfterFirstLineInPath(ctx, inf.chapPath, '自动脉络未写入文件，原因：已更新。请手动检查/更新确认。') } catch {}
       } else if (pr.why === 'empty') {
         try { ctx.ui.notice(t('进度脉络未更新：上游返回空（可能是模型/拒答/截断）', 'Progress not updated: upstream returned empty'), 'err', 2600) } catch {}
+        try { await _ainTryInsertNoteAfterFirstLineInPath(ctx, inf.chapPath, '自动脉络未写入文件，原因：上游返回为空。请手动检查/更新确认。') } catch {}
       }
     }
   }

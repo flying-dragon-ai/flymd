@@ -1,4 +1,3 @@
-<img width="970" height="710" alt="e70dc0ff088e225df7343ca524ab50a2" src="https://github.com/user-attachments/assets/0650c9f9-9dd6-4c34-b8fd-98d56293f7da" /><h1 align="center">飞速MarkDown</h1>
 
 <p align="center">
   <strong>仅 7MB,免费且强大的 Markdown 编辑 / PDF 阅读工具</strong>

@@ -72,6 +72,23 @@ let __AI_FN_DEBOUNCE_TIMER__ = null // 文档名观察者防抖定时器
 let __AI_CONTEXT__ = null // 保存插件 context，供消息操作按钮使用
 let __AI_PENDING_ACTION__ = null // 标记待办/提醒快捷模式
 let __AI_PENDING_IMAGES__ = [] // 待发送的图片（来自对话框粘贴）
+let __AI_AGENT__ = {
+  enabled: false,
+  target: 'auto', // 'auto' | 'selection' | 'document'
+  source: '', // 当前选用的来源：selection/document
+  selection: null, // {start,end,text}
+  original: '',
+  base: '', // 最近一次修订的输入
+  current: '', // 当前修订草稿
+  lastStats: null,
+  showDel: true,
+  busy: false,
+  overlayOpen: false,
+  overlayEscHandler: null,
+  review: null, // { ops:[], hunks:[], map:[], finalText:'' }
+  armedAt: 0,
+  armedText: ''
+}
 let __AI_MD__ = null // Markdown 渲染器实例
 let __AI_KATEX__ = null // KaTeX 渲染器实例（可选）
 let __AI_KATEX_LOADING__ = null // KaTeX 加载中 Promise（避免并发加载）
@@ -1084,6 +1101,876 @@ function updateVisionAttachmentIndicator(){
   } catch {}
 }
 
+function aiAgentEscapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function aiAgentDiffNormEol(s) {
+  return String(s || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+function aiAgentDiffIsBreakChar(ch) {
+  return ch === '\n' || ch === '。' || ch === '！' || ch === '？' || ch === '!' || ch === '?' || ch === '；' || ch === ';' || ch === '…'
+}
+
+function aiAgentDiffTokenize(text, maxChunkLen) {
+  const s = aiAgentDiffNormEol(text)
+  const maxLen = Math.max(20, (maxChunkLen | 0) || 80)
+  const out = []
+  let buf = ''
+  let lastBreak = -1
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    buf += ch
+    if (ch === '\n') {
+      out.push(buf)
+      buf = ''
+      lastBreak = -1
+      continue
+    }
+    if (aiAgentDiffIsBreakChar(ch)) lastBreak = buf.length
+    if (buf.length >= maxLen) {
+      if (lastBreak > 0 && lastBreak < buf.length) {
+        out.push(buf.slice(0, lastBreak))
+        buf = buf.slice(lastBreak)
+      } else {
+        out.push(buf)
+        buf = ''
+      }
+      lastBreak = -1
+    }
+  }
+  if (buf) out.push(buf)
+  return out
+}
+
+function aiAgentDiffLcsOps(aTokens, bTokens) {
+  const a = Array.isArray(aTokens) ? aTokens : []
+  const b = Array.isArray(bTokens) ? bTokens : []
+  const n = a.length
+  const m = b.length
+
+  // 防止 DP 爆内存：极端大文本直接退化成“整段替换”（仍可审阅，但不会细粒度分块）
+  try {
+    const cells = (n + 1) * (m + 1)
+    if (cells > 12000000) {
+      const aAll = a.join('')
+      const bAll = b.join('')
+      if (aAll === bAll) return [{ t: 'eq', s: aAll }]
+      return [{ t: 'del', s: aAll }, { t: 'ins', s: bAll }]
+    }
+  } catch {}
+
+  const cols = m + 1
+  const dp = new Uint16Array((n + 1) * (m + 1))
+
+  for (let i = 1; i <= n; i++) {
+    const ai = a[i - 1]
+    for (let j = 1; j <= m; j++) {
+      const idx = i * cols + j
+      if (ai === b[j - 1]) {
+        dp[idx] = (dp[(i - 1) * cols + (j - 1)] + 1) | 0
+      } else {
+        const up = dp[(i - 1) * cols + j]
+        const left = dp[i * cols + (j - 1)]
+        dp[idx] = up >= left ? up : left
+      }
+    }
+  }
+
+  const ops = []
+  let i = n
+  let j = m
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      ops.push({ t: 'eq', s: a[i - 1] })
+      i--
+      j--
+      continue
+    }
+    const up = dp[(i - 1) * cols + j]
+    const left = dp[i * cols + (j - 1)]
+    if (up >= left) {
+      ops.push({ t: 'del', s: a[i - 1] })
+      i--
+    } else {
+      ops.push({ t: 'ins', s: b[j - 1] })
+      j--
+    }
+  }
+  while (i > 0) {
+    ops.push({ t: 'del', s: a[i - 1] })
+    i--
+  }
+  while (j > 0) {
+    ops.push({ t: 'ins', s: b[j - 1] })
+    j--
+  }
+  ops.reverse()
+  return ops
+}
+
+function aiAgentDiffStats(ops) {
+  const arr = Array.isArray(ops) ? ops : []
+  let insChars = 0
+  let delChars = 0
+  let insSegs = 0
+  let delSegs = 0
+  for (let i = 0; i < arr.length; i++) {
+    const it = arr[i]
+    const t0 = it && it.t ? String(it.t) : ''
+    const s0 = String(it && it.s ? it.s : '')
+    if (t0 === 'ins') {
+      insSegs++
+      insChars += s0.length
+    } else if (t0 === 'del') {
+      delSegs++
+      delChars += s0.length
+    }
+  }
+  return { insChars, delChars, insSegs, delSegs }
+}
+
+function aiAgentDiffRenderHtml(ops, mode) {
+  const arr = Array.isArray(ops) ? ops : []
+  const m = String(mode || 'new')
+  let html = ''
+  for (let i = 0; i < arr.length; i++) {
+    const it = arr[i] || {}
+    const t0 = String(it.t || '')
+    const s0 = aiAgentEscapeHtml(it.s)
+    if (t0 === 'eq') html += s0
+    else if (t0 === 'ins') html += `<mark>${s0}</mark>`
+    else if (t0 === 'del' && m === 'combined') html += `<del>${s0}</del>`
+  }
+  return html
+}
+
+function aiAgentBuildReview(ops) {
+  const arr = Array.isArray(ops) ? ops : []
+  const hunks = []
+  const map = new Int32Array(arr.length)
+  for (let i = 0; i < map.length; i++) map[i] = -1
+
+  const allowEqGap = 1 // 两个改动之间夹 1 个 eq 片段仍算同一块
+  const ctxEq = 1 // 前后各带 1 个 eq 片段做上下文
+
+  let i = 0
+  while (i < arr.length) {
+    if (!arr[i] || arr[i].t === 'eq') { i++; continue }
+    let start = i
+    let end = i
+
+    // 扩展到本块最后一个非 eq（允许中间夹少量 eq）
+    while (end + 1 < arr.length) {
+      if (arr[end + 1] && arr[end + 1].t !== 'eq') { end++; continue }
+      // 允许少量 eq gap 后继续合并
+      let j = end + 1
+      let gap = 0
+      while (j < arr.length && arr[j] && arr[j].t === 'eq' && gap < allowEqGap) { gap++; j++ }
+      if (j < arr.length && arr[j] && arr[j].t !== 'eq') {
+        end = j
+        continue
+      }
+      break
+    }
+
+    // 加一点上下文
+    const viewStart = Math.max(0, start - ctxEq)
+    const viewEnd = Math.min(arr.length - 1, end + ctxEq)
+
+    const id = hunks.length
+    hunks.push({ id, viewStart, viewEnd, accepted: true })
+    for (let k = viewStart; k <= viewEnd; k++) {
+      const it = arr[k]
+      if (it && it.t !== 'eq') map[k] = id
+    }
+
+    i = end + 1
+  }
+
+  return { ops: arr, hunks, map, base: '', cur: '', chunkLen: 0, finalText: '' }
+}
+
+function aiAgentComposeFromReview(review) {
+  const r = review && typeof review === 'object' ? review : null
+  const ops = r && Array.isArray(r.ops) ? r.ops : []
+  const hunks = r && Array.isArray(r.hunks) ? r.hunks : []
+  const map = r && r.map && typeof r.map.length === 'number' ? r.map : null
+
+  const hAcc = (id) => {
+    const h = (id >= 0 && id < hunks.length) ? hunks[id] : null
+    return !!(h && h.accepted)
+  }
+
+  let out = ''
+  for (let i = 0; i < ops.length; i++) {
+    const it = ops[i]
+    if (!it) continue
+    if (it.t === 'eq') { out += it.s; continue }
+    const id = map ? (map[i] | 0) : -1
+    const accept = hAcc(id)
+    if (it.t === 'ins') { if (accept) out += it.s }
+    else if (it.t === 'del') { if (!accept) out += it.s }
+  }
+  return out
+}
+
+function aiAgentArmDangerButton(btn, secondText, windowMs) {
+  try {
+    const b = btn
+    if (!b) return false
+    const now = Date.now()
+    const win = Math.max(600, (windowMs | 0) || 1800)
+    const prevAt = __AI_AGENT__.armedAt | 0
+    if (prevAt && (now - prevAt) <= win) return true
+    __AI_AGENT__.armedAt = now
+    __AI_AGENT__.armedText = String(b.textContent || '')
+    b.textContent = String(secondText || aiText('再次点击确认', 'Click again to confirm'))
+    try { b.classList.add('danger-armed') } catch {}
+    setTimeout(() => {
+      try {
+        if (!__AI_AGENT__ || (__AI_AGENT__.armedAt | 0) !== (now | 0)) return
+        __AI_AGENT__.armedAt = 0
+        const t0 = __AI_AGENT__.armedText
+        if (t0) b.textContent = t0
+        try { b.classList.remove('danger-armed') } catch {}
+      } catch {}
+    }, win + 40)
+    return false
+  } catch {}
+  return false
+}
+
+function aiAgentResetState() {
+  __AI_AGENT__.source = ''
+  __AI_AGENT__.selection = null
+  __AI_AGENT__.original = ''
+  __AI_AGENT__.base = ''
+  __AI_AGENT__.current = ''
+  __AI_AGENT__.lastStats = null
+  __AI_AGENT__.review = null
+  __AI_AGENT__.busy = false
+  try { aiAgentCloseOverlay() } catch {}
+  __AI_AGENT__.armedAt = 0
+  __AI_AGENT__.armedText = ''
+}
+
+function aiAgentRenderOverlay(context) {
+  const overlay = DOC().getElementById('ai-agent-overlay')
+  if (!overlay) return
+  const diff = overlay.querySelector('#ai-agent-overlay-diff')
+  const meta = overlay.querySelector('#ai-agent-overlay-meta')
+  const cb = overlay.querySelector('#ai-agent-overlay-show-del')
+  const list = overlay.querySelector('#ai-agent-overlay-list')
+  const btnApply = overlay.querySelector('#ai-agent-overlay-apply')
+  const btnAllOn = overlay.querySelector('#ai-agent-overlay-all-on')
+  const btnAllOff = overlay.querySelector('#ai-agent-overlay-all-off')
+  if (!diff || !meta) return
+
+  if (cb) cb.checked = !!__AI_AGENT__.showDel
+
+  const base = String(__AI_AGENT__.base || '')
+  const cur = String(__AI_AGENT__.current || '')
+  if (!base || !cur) {
+    meta.textContent = aiText('暂无审阅：先生成一次修订草稿。', 'No review: generate a revision draft first.')
+    diff.textContent = aiText('审阅面板会显示在这里。', 'Review will appear here.')
+    if (list) list.innerHTML = ''
+    if (btnApply) btnApply.setAttribute('disabled', 'true')
+    return
+  }
+  const chunkLen = Math.max(40, Math.min(160, Math.round(Math.max(base.length, cur.length) / 80) || 80))
+
+  // 生成/复用审阅结构：关键点是“不要每次 render 都重建 ops”，否则勾选会被重置（看起来像没反应）
+  let review = __AI_AGENT__.review
+  if (!review || review.base !== base || review.cur !== cur || (review.chunkLen | 0) !== (chunkLen | 0)) {
+    const ops = aiAgentDiffLcsOps(aiAgentDiffTokenize(base, chunkLen), aiAgentDiffTokenize(cur, chunkLen))
+    review = aiAgentBuildReview(ops)
+    review.base = base
+    review.cur = cur
+    review.chunkLen = chunkLen | 0
+    __AI_AGENT__.review = review
+  }
+
+  const ops = review && Array.isArray(review.ops) ? review.ops : []
+  const st = aiAgentDiffStats(ops)
+  __AI_AGENT__.lastStats = st
+
+  const ins = st ? (st.insChars | 0) : 0
+  const del = st ? (st.delChars | 0) : 0
+  const hTotal = review && review.hunks ? review.hunks.length : 0
+  const hOn = review && review.hunks ? review.hunks.filter((h) => !!h.accepted).length : 0
+  meta.textContent = aiText(`改动：+${ins} -${del}；采用 ${hOn}/${hTotal} 处。`, `Changes: +${ins} -${del}; accept ${hOn}/${hTotal}.`)
+
+  // 顶部整体预览：用“当前勾选”拼装出最终稿
+  try {
+    const finalText = aiAgentComposeFromReview(review)
+    review.finalText = finalText
+    diff.innerHTML = aiAgentDiffRenderHtml(aiAgentDiffLcsOps(aiAgentDiffTokenize(base, chunkLen), aiAgentDiffTokenize(finalText, chunkLen)), __AI_AGENT__.showDel ? 'combined' : 'new')
+  } catch {
+    diff.innerHTML = aiAgentDiffRenderHtml(ops, __AI_AGENT__.showDel ? 'combined' : 'new')
+  }
+
+  // 分块审阅列表
+  if (list) {
+    const hunks = review && Array.isArray(review.hunks) ? review.hunks : []
+    const html = []
+    for (const h of hunks) {
+      const slice = ops.slice(h.viewStart, h.viewEnd + 1)
+      const body = aiAgentDiffRenderHtml(slice, __AI_AGENT__.showDel ? 'combined' : 'new')
+      html.push(
+        '<div class="ai-agent-hunk" data-hunk="' + h.id + '">',
+        ' <div class="ai-agent-hunk-head">',
+        '  <label class="ai-agent-check"><input class="ai-agent-hunk-toggle" type="checkbox"' + (h.accepted ? ' checked' : '') + '/> ' + aiText('采用', 'Accept') + '</label>',
+        '  <button class="ai-agent-btn gray ai-agent-hunk-apply">' + aiText('写回本条', 'Apply this') + '</button>',
+        '  <div class="ai-agent-hunk-id">#' + (h.id + 1) + '</div>',
+        ' </div>',
+        ' <div class="ai-agent-hunk-body">' + body + '</div>',
+        '</div>',
+      )
+    }
+    list.innerHTML = html.join('')
+
+    // 绑定每块的勾选
+    list.querySelectorAll('.ai-agent-hunk-toggle').forEach((el2) => {
+      el2.addEventListener('change', (e) => {
+        try {
+          const node = e && e.target ? e.target : null
+          const wrap = node && node.closest ? node.closest('.ai-agent-hunk') : null
+          const hid = wrap ? (wrap.getAttribute('data-hunk') || '') : ''
+          const id = parseInt(hid, 10)
+          if (!Number.isFinite(id) || !review || !review.hunks || !review.hunks[id]) return
+          review.hunks[id].accepted = !!(node && node.checked)
+          aiAgentRenderOverlay(context)
+          aiAgentRenderPanel(context)
+        } catch {}
+      })
+    })
+
+    list.querySelectorAll('.ai-agent-hunk-apply').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        try {
+          const b = e && e.target ? e.target : null
+          const wrap = b && b.closest ? b.closest('.ai-agent-hunk') : null
+          const hid = wrap ? (wrap.getAttribute('data-hunk') || '') : ''
+          const id = parseInt(hid, 10)
+          if (!Number.isFinite(id) || !review || !review.hunks || !review.hunks[id]) return
+
+          // 仅写回“本条”：临时覆盖 accepted 状态生成 partial，然后恢复
+          const old = review.hunks.map((h) => !!h.accepted)
+          try {
+            for (let i = 0; i < review.hunks.length; i++) review.hunks[i].accepted = (i === id)
+            const partial = aiAgentComposeFromReview(review)
+            const out = String(partial || '')
+            if (!out.trim()) throw new Error(aiText('本条写回结果为空', 'Empty result'))
+
+            // 写回：优先按“开始时捕获的选区范围”写回；失败再回退到当前选区
+            if (__AI_AGENT__.source === 'selection') {
+              const s0 = __AI_AGENT__.selection
+              if (s0 && typeof context.replaceRange === 'function' && typeof s0.start === 'number' && typeof s0.end === 'number' && s0.end > s0.start) {
+                await context.replaceRange(s0.start, s0.end, out)
+                __AI_AGENT__.selection = { start: s0.start, end: s0.start + out.length, text: out }
+                try { context.ui.notice(aiText('已写回本条到选区', 'Applied this to selection'), 'ok', 1400) } catch {}
+              } else {
+                const sel = await context.getSelection?.()
+                if (sel && typeof context.replaceRange === 'function' && typeof sel.start === 'number' && typeof sel.end === 'number' && sel.end > sel.start) {
+                  await context.replaceRange(sel.start, sel.end, out)
+                  __AI_AGENT__.selection = { start: sel.start, end: sel.start + out.length, text: out }
+                  __AI_AGENT__.source = 'selection'
+                  try { context.ui.notice(aiText('已写回本条到当前选区', 'Applied this to current selection'), 'ok', 1400) } catch {}
+                } else {
+                  throw new Error(aiText('未找到可替换的选区：请重新选中要替换的文本', 'No selection to replace: please reselect the text'))
+                }
+              }
+            } else {
+              if (typeof context.setEditorValue !== 'function') throw new Error(aiText('当前环境不支持写回全文', 'setEditorValue not available'))
+              context.setEditorValue(out)
+              try { context.ui.notice(aiText('已写回本条到全文', 'Applied this to whole document'), 'ok', 1400) } catch {}
+            }
+
+            // 本条写回后：更新基线为当前文档，让剩余改动继续可审阅
+            __AI_AGENT__.base = out
+            __AI_AGENT__.original = out
+            __AI_AGENT__.review = null
+            __AI_AGENT__.lastStats = null
+            aiAgentRenderPanel(context)
+            aiAgentRenderOverlay(context)
+          } finally {
+            // 恢复原勾选（避免用户勾选状态被破坏）
+            try {
+              for (let i = 0; i < old.length && i < review.hunks.length; i++) review.hunks[i].accepted = old[i]
+            } catch {}
+          }
+        } catch (err) {
+          try { context.ui.notice(aiText('写回本条失败：', 'Apply this failed: ') + (err && err.message ? err.message : String(err)), 'err', 2600) } catch {}
+        }
+      })
+    })
+  }
+
+  if (btnApply) {
+    const hasHunk = review && review.hunks && review.hunks.length > 0
+    if (hasHunk) btnApply.removeAttribute('disabled')
+    else btnApply.setAttribute('disabled', 'true')
+  }
+
+  // 全选/全不选
+  try {
+    if (btnAllOn) btnAllOn.onclick = () => {
+      try {
+        if (!review || !review.hunks) return
+        for (const h of review.hunks) h.accepted = true
+        aiAgentRenderOverlay(context)
+        aiAgentRenderPanel(context)
+      } catch {}
+    }
+    if (btnAllOff) btnAllOff.onclick = () => {
+      try {
+        if (!review || !review.hunks) return
+        for (const h of review.hunks) h.accepted = false
+        aiAgentRenderOverlay(context)
+        aiAgentRenderPanel(context)
+      } catch {}
+    }
+  } catch {}
+}
+
+function aiAgentCloseOverlay() {
+  try {
+    try {
+      const onEsc = __AI_AGENT__ && __AI_AGENT__.overlayEscHandler
+      if (typeof onEsc === 'function') {
+        try { WIN().removeEventListener('keydown', onEsc) } catch {}
+      }
+      if (__AI_AGENT__) __AI_AGENT__.overlayEscHandler = null
+    } catch {}
+    const overlay = DOC().getElementById('ai-agent-overlay')
+    if (overlay) overlay.remove()
+  } catch {}
+  __AI_AGENT__.overlayOpen = false
+}
+
+function aiAgentOpenOverlay(context) {
+  if (__AI_AGENT__.overlayOpen) {
+    aiAgentRenderOverlay(context)
+    return
+  }
+  __AI_AGENT__.overlayOpen = true
+  const overlay = DOC().createElement('div')
+  overlay.id = 'ai-agent-overlay'
+  try {
+    const winEl = DOC().getElementById('ai-assist-win')
+    let isDark = !!(winEl && winEl.classList && winEl.classList.contains('dark'))
+    if (!isDark) {
+      try {
+        const body = WIN().document && WIN().document.body
+        isDark = !!(body && body.classList && body.classList.contains('dark-mode'))
+      } catch {}
+    }
+    if (!isDark) {
+      try { isDark = !!(WIN().matchMedia && WIN().matchMedia('(prefers-color-scheme: dark)').matches) } catch {}
+    }
+    if (isDark) overlay.classList.add('dark')
+  } catch {}
+  overlay.innerHTML = [
+    '<div class="ai-agent-overlay-card">',
+    ' <div class="ai-agent-overlay-head">',
+    `  <div class="ai-agent-overlay-title">${aiText('Agent 审阅', 'Agent Review')}</div>`,
+    '  <div class="ai-agent-overlay-actions">',
+    `   <label class="ai-agent-check"><input id="ai-agent-overlay-show-del" type="checkbox"/> ${aiText('显示删除', 'Show deletions')}</label>`,
+    `   <button id="ai-agent-overlay-all-on" class="ai-agent-btn gray">${aiText('全选', 'All')}</button>`,
+    `   <button id="ai-agent-overlay-all-off" class="ai-agent-btn gray">${aiText('全不选', 'None')}</button>`,
+    `   <button id="ai-agent-overlay-copy" class="ai-agent-btn gray">${aiText('复制', 'Copy')}</button>`,
+    `   <button id="ai-agent-overlay-apply" class="ai-agent-btn">${aiText('写回', 'Apply')}</button>`,
+    `   <button id="ai-agent-overlay-close" class="ai-agent-btn gray">${aiText('关闭', 'Close')}</button>`,
+    '  </div>',
+    ' </div>',
+    ' <div id="ai-agent-overlay-meta" class="ai-agent-overlay-meta"></div>',
+    ' <div id="ai-agent-overlay-diff" class="ai-agent-overlay-diff"></div>',
+    ' <div id="ai-agent-overlay-list" class="ai-agent-overlay-list"></div>',
+    '</div>',
+  ].join('')
+  DOC().body.appendChild(overlay)
+
+  overlay.addEventListener('click', (e) => {
+    if (e && e.target === overlay) aiAgentCloseOverlay()
+  })
+  overlay.querySelector('#ai-agent-overlay-close')?.addEventListener('click', () => aiAgentCloseOverlay())
+  overlay.querySelector('#ai-agent-overlay-show-del')?.addEventListener('change', (e) => {
+    __AI_AGENT__.showDel = !!(e && e.target && e.target.checked)
+    aiAgentRenderPanel(context)
+    aiAgentRenderOverlay(context)
+  })
+  overlay.querySelector('#ai-agent-overlay-copy')?.addEventListener('click', async () => {
+    try {
+      const t0 = (__AI_AGENT__.review && __AI_AGENT__.review.finalText != null)
+        ? String(__AI_AGENT__.review.finalText || '')
+        : String(__AI_AGENT__.current || '')
+      if (!t0.trim()) throw new Error(aiText('修订草稿为空', 'Draft is empty'))
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(t0)
+        try { context.ui.notice(aiText('已复制修订稿', 'Draft copied'), 'ok', 1400) } catch {}
+      } else {
+        throw new Error(aiText('当前环境不支持剪贴板', 'Clipboard not available'))
+      }
+    } catch (err) {
+      try { context.ui.notice(aiText('复制失败：', 'Copy failed: ') + (err && err.message ? err.message : String(err)), 'err', 2200) } catch {}
+    }
+  })
+
+  overlay.querySelector('#ai-agent-overlay-apply')?.addEventListener('click', async (e) => {
+    try {
+      const review = __AI_AGENT__.review
+      const out = review && review.finalText != null ? String(review.finalText || '') : ''
+      if (!out.trim()) throw new Error(aiText('审阅结果为空', 'Review result is empty'))
+
+      // 写回策略：沿用面板的逻辑（选区优先，其次全文）
+      if (__AI_AGENT__.source === 'selection') {
+        const s0 = __AI_AGENT__.selection
+        if (s0 && typeof context.replaceRange === 'function' && typeof s0.start === 'number' && typeof s0.end === 'number' && s0.end > s0.start) {
+          await context.replaceRange(s0.start, s0.end, out)
+          try { context.ui.notice(aiText('已写回选区', 'Applied to selection'), 'ok', 1400) } catch {}
+        } else {
+          const sel = await context.getSelection?.()
+          if (sel && typeof context.replaceRange === 'function' && typeof sel.start === 'number' && typeof sel.end === 'number' && sel.end > sel.start) {
+            await context.replaceRange(sel.start, sel.end, out)
+            try { context.ui.notice(aiText('已写回当前选区', 'Applied to current selection'), 'ok', 1400) } catch {}
+          } else {
+            throw new Error(aiText('未找到可替换的选区：请重新选中要替换的文本', 'No selection to replace: please reselect the text'))
+          }
+        }
+      } else {
+        if (typeof context.setEditorValue !== 'function') throw new Error(aiText('当前环境不支持写回全文', 'setEditorValue not available'))
+        context.setEditorValue(out)
+        try { context.ui.notice(aiText('已写回全文', 'Applied to whole document'), 'ok', 1400) } catch {}
+      }
+
+      // 写回后：把“当前草稿”变成新基线
+      __AI_AGENT__.original = out
+      __AI_AGENT__.base = out
+      __AI_AGENT__.current = out
+      __AI_AGENT__.review = null
+      __AI_AGENT__.selection = null
+      __AI_AGENT__.source = ''
+      __AI_AGENT__.lastStats = null
+      aiAgentRenderPanel(context)
+      aiAgentRenderOverlay(context)
+    } catch (err) {
+      try { context.ui.notice(aiText('写回失败：', 'Apply failed: ') + (err && err.message ? err.message : String(err)), 'err', 2600) } catch {}
+    }
+  })
+
+  try {
+    const onEsc = (e) => {
+      if (e && e.key === 'Escape') {
+        aiAgentCloseOverlay()
+      }
+    }
+    __AI_AGENT__.overlayEscHandler = onEsc
+    WIN().addEventListener('keydown', onEsc)
+  } catch {}
+
+  aiAgentRenderOverlay(context)
+}
+
+async function aiAgentPickSource(context, prefer) {
+  const pref = String(prefer || __AI_AGENT__.target || 'auto')
+  let sel = null
+  try { sel = await context.getSelection?.() } catch {}
+  const selText = sel && sel.text != null ? String(sel.text || '') : ''
+  const hasSel = !!selText.trim()
+  const doc = String(context.getEditorValue ? (context.getEditorValue() || '') : '')
+
+  if (pref === 'selection' || (pref === 'auto' && hasSel)) {
+    if (hasSel) {
+      __AI_AGENT__.source = 'selection'
+      __AI_AGENT__.selection = sel && typeof sel === 'object' ? { start: sel.start, end: sel.end, text: selText } : { start: 0, end: 0, text: selText }
+      if (!__AI_AGENT__.original) __AI_AGENT__.original = selText
+      if (!__AI_AGENT__.current) __AI_AGENT__.current = selText
+      return
+    }
+  }
+  __AI_AGENT__.source = 'document'
+  __AI_AGENT__.selection = null
+  if (!__AI_AGENT__.original) __AI_AGENT__.original = doc
+  if (!__AI_AGENT__.current) __AI_AGENT__.current = doc
+}
+
+function aiAgentEnsurePanelDom(rootEl) {
+  const root = rootEl || DOC()
+  const panel = root.querySelector('#ai-agent-panel')
+  if (!panel) return null
+  if (panel.getAttribute('data-inited') === '1') return panel
+  panel.setAttribute('data-inited', '1')
+  panel.innerHTML = [
+    '<div class="ai-agent-head">',
+    ` <div class="ai-agent-title">${aiText('Agent模式', 'Agent')}</div>`,
+    ' <div class="ai-agent-head-right">',
+    `  <select id="ai-agent-target" class="ai-agent-target" title="${aiText('作用范围：选区/全文', 'Target: selection or whole doc')}">`,
+    `   <option value="auto">${aiText('自动', 'Auto (prefer selection)')}</option>`,
+    `   <option value="selection">${aiText('选区', 'Selection')}</option>`,
+    `   <option value="document">${aiText('全文', 'Whole doc')}</option>`,
+    '  </select>',
+    `  <button id="ai-agent-clear" class="ai-agent-btn gray" title="${aiText('清空草稿', 'Clear draft')}">${aiText('清空', 'Clear')}</button>`,
+    ' </div>',
+    '</div>',
+    `<div class="ai-agent-tip">${aiText('', 'Tell me how to edit; you confirm before applying.')}</div>`,
+    ` <div class="ai-agent-meta" id="ai-agent-meta">${aiText('未开始：可先选中一段文本，再输入修改要求。', 'Not started: optionally select text, then type edit request.')}</div>`,
+    '<div class="ai-agent-tools">',
+    ' <label class="ai-agent-check"><input id="ai-agent-show-del" type="checkbox"/> ' + aiText('显示删除', 'Show deletions') + '</label>',
+    ` <button id="ai-agent-open-diff" class="ai-agent-btn gray">${aiText('对比', 'Diff')}</button>`,
+    ' <div class="ai-agent-spacer"></div>',
+    ` <button id="ai-agent-apply" class="ai-agent-btn">${aiText('写回', 'Apply')}</button>`,
+    ` <button id="ai-agent-close" class="ai-agent-btn gray">${aiText('关闭', 'Close')}</button>`,
+    '</div>',
+    `<div class="ai-agent-tip">${aiText('对比在审阅面板中逐条确认。', 'Review changes in the panel.')}</div>`
+  ].join('')
+  return panel
+}
+
+function aiAgentRenderPanel(context) {
+  const winEl = el('ai-assist-win')
+  if (!winEl) return
+  const panel = aiAgentEnsurePanelDom(winEl)
+  if (!panel) return
+
+  panel.style.display = __AI_AGENT__.enabled ? 'block' : 'none'
+  const btnToggle = winEl.querySelector('#ai-agent-toggle')
+  if (btnToggle) btnToggle.classList.toggle('on', !!__AI_AGENT__.enabled)
+
+  const sel = panel.querySelector('#ai-agent-target')
+  if (sel) {
+    try { sel.value = String(__AI_AGENT__.target || 'auto') } catch {}
+  }
+
+  const meta = panel.querySelector('#ai-agent-meta')
+  const cb = panel.querySelector('#ai-agent-show-del')
+  const btnApply = panel.querySelector('#ai-agent-apply')
+
+  if (cb) cb.checked = !!__AI_AGENT__.showDel
+
+  const srcLabel = __AI_AGENT__.source === 'selection'
+    ? aiText('选区', 'Selection')
+    : (__AI_AGENT__.source === 'document' ? aiText('全文', 'Whole doc') : aiText('未选择', 'None'))
+  const st = __AI_AGENT__.lastStats && typeof __AI_AGENT__.lastStats === 'object' ? __AI_AGENT__.lastStats : null
+  const ins = st ? (st.insChars | 0) : 0
+  const del = st ? (st.delChars | 0) : 0
+  const hasDraft = !!String(__AI_AGENT__.current || '').trim()
+  const hasBase = !!String(__AI_AGENT__.base || '').trim()
+  const busy = !!__AI_AGENT__.busy
+
+  if (meta) {
+    if (!__AI_AGENT__.enabled) meta.textContent = ''
+    else if (busy) meta.textContent = aiText(`生成中… 作用范围：${srcLabel}`, `Working… target: ${srcLabel}`)
+    else if (!hasDraft) meta.textContent = aiText(`未开始 作用范围：${srcLabel}`, `Not started target: ${srcLabel}`)
+    else if (hasBase) meta.textContent = aiText(`已生成修订草稿 作用范围：${srcLabel} 新增 ${ins} 字 删除 ${del} 字`, `Draft ready target: ${srcLabel}; +${ins}, -${del}`)
+    else meta.textContent = aiText(`已生成修订草稿 作用范围：${srcLabel}`, `Draft ready target: ${srcLabel}`)
+  }
+
+  if (btnApply) btnApply.disabled = busy || !hasDraft
+}
+
+function aiAgentBindPanelEvents(context) {
+  const winEl = el('ai-assist-win')
+  if (!winEl) return
+  const panel = aiAgentEnsurePanelDom(winEl)
+  if (!panel) return
+  if (panel.getAttribute('data-events') === '1') return
+  panel.setAttribute('data-events', '1')
+  if (panel.getAttribute('data-bound') === '1') return
+  panel.setAttribute('data-bound', '1')
+
+  panel.querySelector('#ai-agent-target')?.addEventListener('change', (e) => {
+    try { __AI_AGENT__.target = String(e.target.value || 'auto') } catch {}
+    aiAgentResetState()
+    aiAgentRenderPanel(context)
+  })
+
+  panel.querySelector('#ai-agent-clear')?.addEventListener('click', () => {
+    aiAgentResetState()
+    aiAgentRenderPanel(context)
+    try { context.ui.notice(aiText('已清空 Agent 草稿', 'Agent draft cleared'), 'ok', 1200) } catch {}
+  })
+
+  panel.querySelector('#ai-agent-close')?.addEventListener('click', () => {
+    __AI_AGENT__.enabled = false
+    aiAgentResetState()
+    aiAgentRenderPanel(context)
+    try { context.ui.notice(aiText('Agent 模式已关闭', 'Agent mode disabled'), 'ok', 1200) } catch {}
+  })
+
+  panel.querySelector('#ai-agent-show-del')?.addEventListener('change', (e) => {
+    __AI_AGENT__.showDel = !!(e && e.target && e.target.checked)
+    aiAgentRenderPanel(context)
+    aiAgentRenderOverlay(context)
+  })
+
+  panel.querySelector('#ai-agent-open-diff')?.addEventListener('click', () => {
+    try {
+      aiAgentRenderPanel(context)
+      aiAgentOpenOverlay(context)
+    } catch (e) {
+      try { context.ui.notice(aiText('打开对比失败：', 'Open diff failed: ') + (e && e.message ? e.message : String(e)), 'err', 2200) } catch {}
+    }
+  })
+
+  panel.querySelector('#ai-agent-apply')?.addEventListener('click', async (e) => {
+    try {
+      if (__AI_AGENT__.busy) return
+      const out = String(__AI_AGENT__.current || '')
+      if (!out.trim()) throw new Error(aiText('修订草稿为空', 'Draft is empty'))
+
+      // 写回策略：优先按“开始时捕获的选区范围”写回；失败再回退到当前选区
+      if (__AI_AGENT__.source === 'selection') {
+        const s0 = __AI_AGENT__.selection
+        if (s0 && typeof context.replaceRange === 'function' && typeof s0.start === 'number' && typeof s0.end === 'number' && s0.end > s0.start) {
+          await context.replaceRange(s0.start, s0.end, out)
+          try { context.ui.notice(aiText('已写回选区', 'Applied to selection'), 'ok', 1400) } catch {}
+        } else {
+          const sel = await context.getSelection?.()
+          if (sel && typeof context.replaceRange === 'function' && typeof sel.start === 'number' && typeof sel.end === 'number' && sel.end > sel.start) {
+            await context.replaceRange(sel.start, sel.end, out)
+            try { context.ui.notice(aiText('已写回当前选区', 'Applied to current selection'), 'ok', 1400) } catch {}
+          } else {
+            throw new Error(aiText('未找到可替换的选区：请重新选中要替换的文本', 'No selection to replace: please reselect the text'))
+          }
+        }
+      } else {
+        if (typeof context.setEditorValue !== 'function') throw new Error(aiText('当前环境不支持写回全文', 'setEditorValue not available'))
+        context.setEditorValue(out)
+        try { context.ui.notice(aiText('已写回全文', 'Applied to whole document'), 'ok', 1400) } catch {}
+      }
+
+      // 写回后：把“当前草稿”变成新基线，方便继续对话式微调
+      __AI_AGENT__.original = out
+      __AI_AGENT__.base = out
+      __AI_AGENT__.current = out
+      __AI_AGENT__.review = null
+      __AI_AGENT__.selection = null
+      __AI_AGENT__.source = ''
+      __AI_AGENT__.lastStats = null
+      aiAgentRenderPanel(context)
+      aiAgentRenderOverlay(context)
+    } catch (err) {
+      try { context.ui.notice(aiText('写回失败：', 'Apply failed: ') + (err && err.message ? err.message : String(err)), 'err', 2600) } catch {}
+    }
+  })
+}
+
+function aiAgentBuildMessages(baseText, instruction) {
+  const locale = aiGetLocale()
+  const sys = locale === 'en'
+    ? [
+        'You are a text editing agent.',
+        'Rewrite the given text according to user requests.',
+        'Output ONLY the rewritten full text. No explanations. No markdown. No bullet list.',
+        'Keep the original formatting as much as possible (line breaks, punctuation).',
+        'If the request is small, do minimal changes.',
+      ].join('\n')
+    : [
+        '你是一个“文本编辑Agent”。',
+        '根据用户的修改要求，重写给定文本。',
+        '只输出“修订后的全文”，不要解释、不要清单、不要Markdown、不要代码块。',
+        '尽量保持原始排版（换行、标点、段落）。',
+        '改动很小就少改，别自作主张扩写。',
+      ].join('\n')
+
+  const u = [
+    locale === 'en' ? 'ORIGINAL TEXT:' : '【原文】',
+    String(baseText || ''),
+    '',
+    locale === 'en' ? 'EDIT REQUEST:' : '【修改要求】',
+    String(instruction || '').trim(),
+    '',
+    locale === 'en' ? 'Remember: output only the rewritten full text.' : '再次强调：只输出修订后的全文。',
+  ].join('\n')
+
+  return [
+    { role: 'system', content: sys },
+    { role: 'user', content: u }
+  ]
+}
+
+function aiAgentAddThinking(context) {
+  try {
+    const chatEl = el('ai-chat')
+    if (!chatEl) return () => {}
+    const wrap = DOC().createElement('div')
+    wrap.className = 'msg-wrapper'
+    wrap.id = 'ai-agent-thinking'
+    const bubble = DOC().createElement('div')
+    bubble.className = 'msg a ai-thinking'
+    bubble.innerHTML = '<span class="ai-thinking-dot"></span><span class="ai-thinking-dot"></span><span class="ai-thinking-dot"></span>'
+    wrap.appendChild(bubble)
+    chatEl.appendChild(wrap)
+    chatEl.scrollTop = chatEl.scrollHeight
+    return () => { try { wrap.remove() } catch {} }
+  } catch {
+    return () => {}
+  }
+}
+
+async function sendFromInputAgent(context) {
+  const ta = el('ai-text')
+  const text = String((ta && ta.value) || '').trim()
+  if (!text) return
+  if (__AI_SENDING__) {
+    try { context.ui.notice(aiText('请等待当前 AI 响应完成', 'Please wait for the current response'), 'warn', 1800) } catch {}
+    return
+  }
+  if (ta) ta.value = ''
+  await ensureSessionForDoc(context)
+  pushMsg('user', text)
+  try { await syncCurrentSessionToDB(context) } catch {}
+  renderMsgs(el('ai-chat'))
+
+  __AI_SENDING__ = true
+  __AI_AGENT__.busy = true
+  aiAgentBindPanelEvents(context)
+  aiAgentRenderPanel(context)
+  const removeThinking = aiAgentAddThinking(context)
+  try {
+    await aiAgentPickSource(context, __AI_AGENT__.target)
+    const base = String(__AI_AGENT__.current || '')
+    __AI_AGENT__.base = base
+    aiAgentRenderPanel(context)
+
+    const cfg = await ensureApiConfig(context)
+    const messages = aiAgentBuildMessages(base, text)
+    const body = { model: resolveModelId(cfg), messages, stream: false }
+    const res = await performAIRequest(cfg, body)
+    const next = String(res && res.text != null ? res.text : '').trim()
+    if (!next) throw new Error(aiText('AI 返回为空', 'Empty AI response'))
+    __AI_AGENT__.current = next
+    __AI_AGENT__.busy = false
+    aiAgentRenderPanel(context)
+
+    try { aiAgentOpenOverlay(context) } catch {}
+    pushMsg('assistant', aiText('Agent：已生成修订草稿，请审阅', 'Agent: draft ready. Please review.'))
+    __AI_LAST_REPLY__ = 'Agent draft ready'
+    renderMsgs(el('ai-chat'))
+    try { await syncCurrentSessionToDB(context) } catch {}
+  } catch (err) {
+    __AI_AGENT__.busy = false
+    aiAgentRenderPanel(context)
+    pushMsg('assistant', aiText('Agent失败：', 'Agent failed: ') + (err && err.message ? err.message : String(err)))
+    __AI_LAST_REPLY__ = 'Agent failed'
+    renderMsgs(el('ai-chat'))
+    try { await syncCurrentSessionToDB(context) } catch {}
+  } finally {
+    try { removeThinking() } catch {}
+    __AI_SENDING__ = false
+    __AI_AGENT__.busy = false
+    aiAgentRenderPanel(context)
+    aiAgentRenderOverlay(context)
+  }
+}
+
 async function callAIForPlugins(context, prompt, options = {}){
   const text = String(prompt || '').trim()
   if (!text) throw new Error('Prompt 不能为空')
@@ -1473,7 +2360,8 @@ function ensureCss() {
     '#ai-assist-win.dark input:checked + .toggle-slider-mini{background:#3b82f6}',
     // 新增：输入框区域样式
     '.ai-input-wrap{position:relative;width:100%;background:#fff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}',
-    '.ai-input-wrap textarea{width:100%;min-height:72px;background:transparent;border:none;color:#0f172a;padding:10px 40px 28px 10px;resize:none;font-family:inherit;font-size:13px;box-sizing:border-box;outline:none}',
+    // 底部按钮行会覆盖输入内容：加大 padding-bottom 预留空间
+    '.ai-input-wrap textarea{width:100%;min-height:72px;background:transparent;border:none;color:#0f172a;padding:10px 40px 70px 10px;resize:none;font-family:inherit;font-size:13px;box-sizing:border-box;outline:none}',
     '.ai-input-wrap:focus-within{border-color:#3b82f6}',
     '.ai-quick-action-wrap{position:absolute;left:10px;bottom:8px;display:flex;align-items:center;gap:4px}',
     '.ai-quick-action-wrap select{background:transparent;border:none;color:#6b7280;font-size:13px;cursor:pointer;padding:4px 2px;outline:none}',
@@ -1484,10 +2372,16 @@ function ensureCss() {
     '.ai-vision-toggle[data-count]:after{content:attr(data-count);position:absolute;right:-2px;top:-2px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;line-height:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px #fff;}',
     '.ai-rag-toggle{min-width:26px;height:24px;padding:0 8px;border-radius:999px;border:1px solid #d1d5db;background:rgba(255,255,255,.95);color:#6b7280;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}',
     '.ai-rag-toggle.active{border-color:#16a34a;background:#dcfce7;color:#166534;box-shadow:0 0 0 1px rgba(22,163,74,.15)}',
+    '.ai-agent-toggle{min-width:26px;height:24px;padding:0 8px;border-radius:999px;border:1px solid #d1d5db;background:rgba(255,255,255,.95);color:#6b7280;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}',
+    '.ai-agent-toggle.on{border-color:rgba(37,99,235,.45);background:rgba(37,99,235,.12);color:#1d4ed8;box-shadow:0 0 0 1px rgba(37,99,235,.10)}',
     '#ai-assist-win.dark .ai-rag-toggle{background:#2a2b2f;border-color:#4b5563;color:#9ca3af}',
     '#ai-assist-win.dark .ai-rag-toggle:not(.disabled):hover{background:#34353a;border-color:#6b7280}',
     '#ai-assist-win.dark .ai-rag-toggle.active{background:#166534;border-color:#22c55e;color:#ffffff;box-shadow:0 0 0 2px rgba(34,197,94,0.20)}',
     '#ai-assist-win.dark .ai-rag-toggle.active:not(.disabled):hover{background:#16a34a}',
+    '#ai-assist-win.dark .ai-agent-toggle{background:#2a2b2f;border-color:#4b5563;color:#9ca3af}',
+    '#ai-assist-win.dark .ai-agent-toggle:not(.disabled):hover{background:#34353a;border-color:#6b7280}',
+    '#ai-assist-win.dark .ai-agent-toggle.on{background:#1e40af;border-color:#3b82f6;color:#ffffff;box-shadow:0 0 0 2px rgba(59,130,246,0.25)}',
+    '#ai-assist-win.dark .ai-agent-toggle.on:not(.disabled):hover{background:#2563eb}',
     '#ai-assist-win.dark .ai-input-wrap{background:#1a1b1e;border-color:#1f2937}',
     '#ai-assist-win.dark .ai-input-wrap textarea{color:#e5e7eb}',
     '#ai-assist-win.dark .ai-input-wrap:focus-within{border-color:#3b82f6}',
@@ -1507,6 +2401,56 @@ function ensureCss() {
     '#ai-send:hover{color:#3b82f6}',
     '#ai-assist-win.dark #ai-send{color:#6b7280}',
     '#ai-assist-win.dark #ai-send:hover{color:#60a5fa}',
+    // Agent 模式面板
+    '#ai-agent-panel{display:none;border-top:1px solid #e5e7eb;background:rgba(255,255,255,.96);padding:10px 10px 12px 10px}',
+    '#ai-assist-win.dark #ai-agent-panel{border-top:1px solid #1f2937;background:rgba(26,27,30,.96)}',
+    '.ai-agent-head{display:flex;align-items:center;justify-content:space-between;gap:10px}',
+    '.ai-agent-title{font-size:13px;font-weight:700;color:#0f172a}',
+    '#ai-assist-win.dark .ai-agent-title{color:#e5e7eb}',
+    '.ai-agent-head-right{display:flex;align-items:center;gap:8px}',
+    '.ai-agent-target{font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid #e5e7eb;background:#fff;color:#334155}',
+    '#ai-assist-win.dark .ai-agent-target{border-color:#374151;background:#1a1b1e;color:#e5e7eb}',
+    '.ai-agent-tip{margin-top:6px;font-size:12px;color:#64748b;line-height:1.35}',
+    '#ai-assist-win.dark .ai-agent-tip{color:#9ca3af}',
+    '.ai-agent-row{display:flex;align-items:center;gap:10px;margin-top:8px}',
+    '.ai-agent-meta{font-size:12px;color:#475569;flex:1}',
+    '#ai-assist-win.dark .ai-agent-meta{color:#9ca3af}',
+    '.ai-agent-tools{display:flex;align-items:center;gap:10px;margin-top:8px}',
+    '.ai-agent-check{font-size:12px;color:#64748b;display:flex;align-items:center;gap:6px;user-select:none}',
+    '#ai-assist-win.dark .ai-agent-check{color:#9ca3af}',
+    '.ai-agent-btn{height:26px;padding:0 10px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#334155;font-size:12px;cursor:pointer;transition:all .15s}',
+    '.ai-agent-btn:hover{border-color:#93c5fd}',
+    '.ai-agent-btn:disabled{opacity:.55;cursor:not-allowed}',
+    '.ai-agent-btn.gray{background:transparent;color:#64748b}',
+    '#ai-assist-win.dark .ai-agent-btn{border-color:#374151;background:#1a1b1e;color:#e5e7eb}',
+    '#ai-assist-win.dark .ai-agent-btn.gray{background:#1a1b1e;color:#9ca3af}',
+    '.ai-agent-btn.danger-armed{border-color:#ef4444;color:#ef4444}',
+    '.ai-agent-spacer{flex:1}',
+    // Agent 审阅弹窗（宿主全局）
+    '#ai-agent-overlay{position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,.35);display:flex;align-items:center;justify-content:center;padding:18px}',
+    '.ai-agent-overlay-card{width:min(980px,calc(100vw - 24px));height:min(78vh,860px);background:#ffffff;color:#0f172a;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 16px 46px rgba(0,0,0,.20);display:flex;flex-direction:column;overflow:hidden}',
+    '#ai-agent-overlay.dark{background:rgba(0,0,0,.55)}',
+    '#ai-agent-overlay.dark .ai-agent-overlay-card{background:#1a1b1e;color:#e5e7eb;border-color:#1f2937}',
+    '.ai-agent-overlay-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid #e5e7eb}',
+    '#ai-agent-overlay.dark .ai-agent-overlay-head{border-bottom-color:#1f2937}',
+    '.ai-agent-overlay-title{font-size:14px;font-weight:700}',
+    '.ai-agent-overlay-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}',
+    '.ai-agent-overlay-meta{padding:10px 12px 0 12px;font-size:12px;color:#475569}',
+    '#ai-agent-overlay.dark .ai-agent-overlay-meta{color:#9ca3af}',
+    '.ai-agent-overlay-diff{flex:0 0 auto;max-height:22vh;overflow:auto;padding:10px 12px 10px 12px;white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13px;border-bottom:1px solid rgba(226,232,240,.9)}',
+    '#ai-agent-overlay.dark .ai-agent-overlay-diff{border-bottom-color:#1f2937}',
+    '.ai-agent-overlay-diff mark{background:rgba(34,197,94,.22);color:inherit;padding:0 .1em;border-radius:3px}',
+    '.ai-agent-overlay-diff del{background:rgba(239,68,68,.12);color:inherit;text-decoration:line-through;padding:0 .1em;border-radius:3px}',
+    '.ai-agent-overlay-list{flex:1;overflow:auto;padding:10px 12px 14px 12px}',
+    '.ai-agent-hunk{border:1px solid rgba(226,232,240,.9);border-radius:10px;background:#fff;margin-bottom:10px;overflow:hidden}',
+    '#ai-agent-overlay.dark .ai-agent-hunk{border-color:#1f2937;background:#0b1220}',
+    '.ai-agent-hunk-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:rgba(241,245,249,.75)}',
+    '#ai-agent-overlay.dark .ai-agent-hunk-head{background:rgba(17,24,39,.75)}',
+    '.ai-agent-hunk-id{font-size:12px;color:#64748b}',
+    '#ai-agent-overlay.dark .ai-agent-hunk-id{color:#9ca3af}',
+    '.ai-agent-hunk-body{padding:10px 10px 12px 10px;white-space:pre-wrap;word-break:break-word;line-height:1.55;font-size:13px}',
+    '.ai-agent-hunk-body mark{background:rgba(34,197,94,.22);color:inherit;padding:0 .1em;border-radius:3px}',
+    '.ai-agent-hunk-body del{background:rgba(239,68,68,.12);color:inherit;text-decoration:line-through;padding:0 .1em;border-radius:3px}',
     // ========== 新增：动画效果 ==========
     // 消息入场动画
     '@keyframes ai-msg-slide-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}',
@@ -2737,11 +3681,12 @@ async function mountWindow(context){
     '  </div>',
     ' </div>',
     ' <div id="ai-chat"></div>',
+    ' <div id="ai-agent-panel"></div>',
     // 输入框区域：左下角快捷操作下拉
      ' <div id="ai-input">',
-     '  <div class="ai-input-wrap">',
-     '   <textarea id="ai-text" placeholder="' + aiText('输入与 AI 对话...', 'Talk with AI...') + '"></textarea>',
-     '   <div class="ai-quick-action-wrap">',
+      '  <div class="ai-input-wrap">',
+       '   <textarea id="ai-text" placeholder="' + aiText('输入与 AI 对话...', 'Talk with AI...') + '"></textarea>',
+       '   <div class="ai-quick-action-wrap">',
      '    <select id="ai-quick-action" title="' + aiText('快捷操作', 'Quick actions') + '">',
      '     <option value="">' + aiText('智能问答', 'Ask AI') + '</option>',
      '     <option value="续写">' + aiText('续写', 'Continue writing') + '</option>',
@@ -2750,13 +3695,14 @@ async function mountWindow(context){
      '     <option value="提纲">' + aiText('提纲', 'Outline') + '</option>',
      '     <option value="待办">' + aiText('待办', 'Todo') + '</option>',
      '     <option value="提醒">' + aiText('提醒', 'Reminder') + '</option>',
-     '    </select>',
-     '    <button id="ai-vision-toggle" class="ai-vision-toggle" title="' + aiText('视觉模式：点击开启，让 AI 读取文档中的图片', 'Vision mode: let AI read images from the document') + '">Vision</button>',
-     '    <button id="ai-rag-toggle" class="ai-rag-toggle" title="' + aiText('知识库检索：点击开启/关闭（与设置联动）', 'RAG: toggle knowledge search (sync with settings)') + '">RAG</button>',
-     '   </div>',
-     '   <button id="ai-send" title="' + aiText('发送消息', 'Send message') + '">↵</button>',
-     '  </div>',
-    ' </div>',
+      '    </select>',
+      '    <button id="ai-vision-toggle" class="ai-vision-toggle" title="' + aiText('视觉模式：点击开启，让 AI 读取文档中的图片', 'Vision mode: let AI read images from the document') + '">Vision</button>',
+      '    <button id="ai-rag-toggle" class="ai-rag-toggle" title="' + aiText('知识库检索：点击开启/关闭（与设置联动）', 'RAG: toggle knowledge search (sync with settings)') + '">RAG</button>',
+      '    <button id="ai-agent-toggle" class="ai-agent-toggle" title="' + aiText('Agent模式：把你的修改要求应用到选区或全文', 'Agent mode: apply your edit requests to selection or doc') + '">Agent</button>',
+      '   </div>',
+      '   <button id="ai-send" title="' + aiText('发送消息', 'Send message') + '">↵</button>',
+      '  </div>',
+     ' </div>',
     '</div><div id="ai-vresizer" title="拖动调整宽度"></div><div id="ai-resizer" title="拖动调整尺寸"></div>'
   ].join('')
   DOC().body.appendChild(el)
@@ -2936,6 +3882,38 @@ async function mountWindow(context){
       })
     }
   } catch {}
+
+  // Agent 模式开关：对话式改文（写回需二次确认）
+  try {
+    const agentBtn = el.querySelector('#ai-agent-toggle')
+    if (agentBtn) {
+      agentBtn.addEventListener('click', async () => {
+        try {
+          if (__AI_SENDING__) {
+            try { context.ui.notice(aiText('请等待当前 AI 响应完成', 'Please wait for the current response'), 'warn', 1800) } catch {}
+            return
+          }
+          __AI_AGENT__.enabled = !__AI_AGENT__.enabled
+          if (!__AI_AGENT__.enabled) {
+            aiAgentResetState()
+            aiAgentRenderPanel(context)
+            try { context.ui.notice(aiText('Agent 模式已关闭', 'Agent mode disabled'), 'ok', 1200) } catch {}
+            return
+          }
+          aiAgentBindPanelEvents(context)
+          await aiAgentPickSource(context, __AI_AGENT__.target)
+          aiAgentRenderPanel(context)
+          try { context.ui.notice(aiText('Agent 模式已开启', 'Agent enabled: tell me how to edit; you confirm to apply.'), 'ok', 2200) } catch {}
+          try { const ta = el.querySelector('#ai-text'); if (ta) ta.focus() } catch {}
+        } catch (e) {
+          console.error('切换 Agent 模式失败：', e)
+        }
+      })
+    }
+  } catch {}
+
+  // 初始渲染（窗口创建后立即同步一次）
+  try { aiAgentBindPanelEvents(context); aiAgentRenderPanel(context) } catch {}
 
   // 发送按钮和回车发送
   el.querySelector('#ai-send').addEventListener('click',()=>{ sendFromInputWithAction(context) })
@@ -4061,6 +5039,12 @@ async function sendFromInputWithAction(context){
   if (action && ['续写', '润色', '纠错', '提纲'].includes(action)) {
     actionSelect.value = '' // 重置选择
     await quick(context, action)
+    return
+  }
+
+  // Agent 模式：把用户的这句话当作“修改要求”，生成修订草稿（写回需二次确认）
+  if (__AI_AGENT__ && __AI_AGENT__.enabled) {
+    await sendFromInputAgent(context)
     return
   }
 

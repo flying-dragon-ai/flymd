@@ -1580,7 +1580,7 @@ async function style_generate_for_names(ctx, cfg, names, opt) {
   const bible = await getBibleDocText(ctx, cfg)
   const prev = await getPrevTextForRequest(ctx, cfg)
   // 注意：生成风格时不要把“人物风格”自身循环注入；只用人物状态与硬约束作为事实锚点
-  const constraints = _ainAppendWritingStyleHintToConstraints(await mergeConstraintsWithCharStateOnly(ctx, cfg, ''))
+  const constraints = await mergeConstraintsWithCharStateOnly(ctx, cfg, '')
 
   // 风格检索：用更小预算、更短片段，避免把整章历史塞进来
   let rag = null
@@ -1598,51 +1598,67 @@ async function style_generate_for_names(ctx, cfg, names, opt) {
   } catch {}
 
   const o = (opt && typeof opt === 'object') ? opt : {}
-  const title = safeText(o.title).trim()
   const why = safeText(o.why).trim()
 
-  const question = [
-    '任务：为【目标人物】生成“写作风格卡”，用于续写时保持人物风格一致。',
+  // 注意：不能走 ai/proxy/consult/：它的 system 会强制输出“诊断/建议/走向/风险”等模板，和风格卡目标冲突。
+  // 为了向前兼容与可控性，这里复用 action:revise：给一个固定骨架，让模型只填“风格呈现”，不讨论剧情走向。
+  const baseText = arr.map((nm) => ([
+    '### ' + nm,
+    '- 语言：',
+    '- 行事：',
+    '- 决策：',
+    '- 情绪：',
+    '- 关系：',
+    '- 禁忌：',
+    ''
+  ].join('\n'))).join('\n').trim() + '\n'
+
+  const inst = [
+    '任务：把【人物风格卡骨架】补全为可直接注入写作的“人物风格卡”。',
     '目标人物：' + listLine,
-    '',
-    '输入：你会看到【人物状态/进度脉络/主要角色设定】以及【RAG 历史片段】。',
-    '规则（必须严格遵守）：',
-    '1) 只写“语言/行为呈现”的风格，不得新增任何事实（背景/年龄/能力/剧情事件/关系结论都不许）。',
-    '2) 若风格推断与【人物状态】或【主要角色】冲突：以事实为准，在该人物小节末尾加“注意：风格与事实冲突，已以事实为准”。',
-    '3) 输出 Markdown：按人物分节，每人用 6~10 条短条目，结构固定为：',
-    '   ### 人物名',
-    '   - 语言：…',
-    '   - 行事：…',
-    '   - 决策：…',
-    '   - 情绪：…',
-    '   - 关系：…（只写“表达方式/边界”，不写新事实）',
-    '   - 禁忌：…',
-    '4) 不要写正文，不要解释系统提示，不要 JSON，不要 ``` 代码块。',
-    (title ? ('附加标题：' + title) : ''),
     (why ? ('触发原因：' + why) : ''),
+    '',
+    '强规则（必须严格遵守）：',
+    '1) 只允许输出“### 人物名 + 6条 - 字段：内容”的 Markdown；禁止输出任何其它小节/标题，例如：【结论】【诊断】【建议】【可选走向】【风险点】【需要你补充】等一律禁止。',
+    '2) 只写“语言/行为呈现”的风格，不得新增任何事实（背景/年龄/能力/剧情事件/关系结论都不许）。',
+    '3) 若风格与【人物状态】或【主要角色】冲突：以事实为准，在该人物末尾额外追加一条：- 注意：风格与事实冲突，已以事实为准。',
+    '4) 每条内容尽量短（10~30字），可执行、可复用；不要写正文，不要写剧情走向。',
+    '',
+    '现在开始：在不改变骨架结构的前提下，把每个“字段：”后面补上内容；不允许留空，不允许写“（无）”。'
   ].filter(Boolean).join('\n')
 
-  const resp = await apiFetchConsultWithJob(ctx, cfg, {
+  const input0 = {
+    instruction: inst,
+    text: baseText,
+    progress,
+    bible,
+    prev,
+    constraints: constraints || undefined,
+    rag: rag || undefined
+  }
+  const b = _ainCtxApplyBudget(cfg, input0, { mode: 'revise' })
+
+  const resp = await apiFetchChatWithJob(ctx, cfg, {
+    mode: 'novel',
+    action: 'revise',
     upstream: {
       baseUrl: cfg.upstream.baseUrl,
       apiKey: cfg.upstream.apiKey,
       model: cfg.upstream.model
     },
-    input: {
-      async: true,
-      mode: 'job',
-      question,
-      progress,
-      bible,
-      prev,
-      constraints: constraints || undefined,
-      rag: rag || undefined
-    }
+    input: (b && b.input) ? b.input : input0
   }, {
     timeoutMs: 190000,
     onTick: (o && typeof o.onTick === 'function') ? o.onTick : undefined
   })
-  return safeText(resp && resp.text).trim()
+
+  const outText = safeText(resp && resp.text).trim()
+  const meta = {
+    ragHits: Array.isArray(rag) ? rag.length : 0,
+    ragChars: _ainRagChars(rag),
+    usage: b && b.usage ? b.usage : null
+  }
+  return { text: outText, meta }
 }
 
 function _fallbackHash32(s) {
@@ -4256,7 +4272,6 @@ async function openNextOptionsDialog(ctx) {
       if (!lastText) throw new Error(t('后端未返回正文', 'Backend returned empty text'))
       lastText = _ainMaybeTypesetWebNovel(cfg, lastText)
       out.textContent = lastText
-      try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
       ctx.ui.notice(t('已生成正文（未写入文档）', 'Generated (not inserted)'), 'ok', 1600)
@@ -4698,6 +4713,67 @@ async function openWriteWithChoiceDialog(ctx) {
         : t('未发现人物风格快照。', 'No style snapshot found.')
     } catch (e) {
       styleStatus.textContent = t('读取失败：', 'Read failed: ') + (e && e.message ? e.message : String(e))
+    } finally {
+      try { scheduleDetectMissingStyle('style_refresh') } catch {}
+    }
+  }
+
+  let _missingStyleDetectTimer = null
+  let _missingStyleDetectInFlight = false
+  function scheduleDetectMissingStyle(reason) {
+    try {
+      if (_missingStyleDetectTimer) clearTimeout(_missingStyleDetectTimer)
+    } catch {}
+    _missingStyleDetectTimer = setTimeout(() => {
+      _missingStyleDetectTimer = null
+      void detectMissingStyleCandidates(reason).catch(() => {})
+    }, 60)
+  }
+
+  async function detectMissingStyleCandidates(reason) {
+    if (_missingStyleDetectInFlight) return
+    _missingStyleDetectInFlight = true
+    try {
+      cfg = await loadCfg(ctx)
+      // 以“人物状态快照”为准：它是事实层，且最可能包含上一章新出现的人
+      const rawState = _charStateLastBlockFull ? _charStateLastBlockFull : safeText(await getCharStateDocRaw(ctx, cfg))
+      const stateBlock = _ainCharStatePickLatestBlock(rawState)
+      const items = _ainCharStateParseItemsFromBlock(stateBlock)
+      const stateNames = _ainUniqNames(items.map((x) => safeText(x && x.name))).filter(_ainLikelyPersonName)
+
+      const mainRaw = await getMainCharactersDocRaw(ctx, cfg)
+      const mainNames = new Set(_ainParseNamesFromMainCharsDoc(mainRaw).map(_ainNormName).filter(Boolean))
+
+      const styleRaw = _styleLastBlockFull ? _styleLastBlockFull : safeText(await getStyleDocRaw(ctx, cfg))
+      const styleBlock = _ainStylePickLatestBlock(styleRaw)
+      const styleNames = new Set(_ainParseNamesFromStyleBlock(styleBlock).map(_ainNormName).filter(Boolean))
+
+      const missing = []
+      for (let i = 0; i < stateNames.length; i++) {
+        const nm = stateNames[i]
+        if (!nm) continue
+        if (mainNames.has(nm)) continue
+        if (styleNames.has(nm)) continue
+        missing.push(nm)
+        if (missing.length >= 20) break
+      }
+
+      _newCharCandidates = missing
+      renderNewCharCandidates()
+      if (missing.length) {
+        try {
+          styleStatus.textContent =
+            t('检测到待补风格人物：', 'Missing style cards: ') +
+            missing.slice(0, 6).join('、') +
+            (missing.length > 6 ? '…' : '') +
+            (reason ? ('（' + String(reason) + '）') : '')
+        } catch {}
+      }
+    } catch {
+      _newCharCandidates = []
+      renderNewCharCandidates()
+    } finally {
+      _missingStyleDetectInFlight = false
     }
   }
 
@@ -4707,7 +4783,7 @@ async function openWriteWithChoiceDialog(ctx) {
     if (!arr.length) return
     const tip = document.createElement('div')
     tip.className = 'ain-muted'
-    tip.textContent = t('检测到疑似新增人物：勾选确认后可一键刷新风格卡（不会改动主要角色文件）。', 'Possible new characters detected: confirm to refresh style cards (won’t modify main characters file).')
+    tip.textContent = t('检测到“人物状态快照”里出现但尚未写入风格卡的人物：勾选确认后生成并写入 08_人物风格.md（不会改动主要角色文件）。', 'Characters present in state snapshot but missing style cards: confirm to generate & write to 08_人物风格.md (won’t modify main characters file).')
     newCharBox.appendChild(tip)
 
     const list = document.createElement('div')
@@ -4744,14 +4820,14 @@ async function openWriteWithChoiceDialog(ctx) {
     row.style.marginTop = '8px'
     const btnConfirm = document.createElement('button')
     btnConfirm.className = 'ain-btn gray'
-    btnConfirm.textContent = t('确认新增并刷新风格', 'Confirm & refresh style')
+    btnConfirm.textContent = t('生成风格卡并写入', 'Generate & write style')
     row.appendChild(btnConfirm)
     newCharBox.appendChild(row)
 
     btnConfirm.onclick = async () => {
       try {
         const pick = checks.filter((x) => x && x.cb && x.cb.checked).map((x) => x.name)
-        await doStyleUpdate(pick, t('新增人物确认', 'new character confirmed'))
+        await doStyleUpdate(pick, t('待补风格（来自人物状态）', 'missing style (from states)'))
         // 刷新后清空候选，避免反复提示
         _newCharCandidates = []
         renderNewCharCandidates()
@@ -4776,14 +4852,25 @@ async function openWriteWithChoiceDialog(ctx) {
         throw new Error(t('请先在设置里填写上游 BaseURL 和模型', 'Please set upstream BaseURL and model in Settings first'))
       }
       styleStatus.textContent = t('生成风格卡中…', 'Generating style cards...')
-      const txt = await style_generate_for_names(ctx, cfg, list, {
+      const res = await style_generate_for_names(ctx, cfg, list, {
         why: safeText(why).trim(),
         onTick: ({ waitMs }) => {
           const s = Math.max(0, Math.round(Number(waitMs || 0) / 1000))
           styleStatus.textContent = t('生成风格卡中… 已等待 ', 'Generating style... waited ') + s + 's'
         }
       })
+      const txt = safeText(res && typeof res === 'object' ? res.text : res).trim()
       if (!txt) throw new Error(t('后端未返回风格卡', 'Backend returned empty style'))
+      try {
+        const meta = res && typeof res === 'object' ? res.meta : null
+        if (meta && typeof meta === 'object') {
+          const rh = Number.isFinite(meta.ragHits) ? (meta.ragHits | 0) : 0
+          const rc = Number.isFinite(meta.ragChars) ? (meta.ragChars | 0) : 0
+          const u = meta.usage && typeof meta.usage === 'object' ? meta.usage : null
+          const ut = u ? ('；' + t('占用 ', 'usage ') + String((u.totalUsed | 0) || 0) + '/' + String((u.effective | 0) || 0)) : ''
+          styleStatus.textContent = t('风格检索命中：', 'RAG hits: ') + String(rh) + t(' 条（', ' (') + String(rc) + t(' 字符）', ' chars)') + ut
+        }
+      } catch {}
       await style_append_block(ctx, cfg, txt, t('自动更新（人物风格） ', 'Auto update (style) ') + _fmtLocalTs())
       await refreshStyleFromFile()
       ctx.ui.notice(t('已更新人物风格（08_人物风格.md）', 'Style updated (08_人物风格.md)'), 'ok', 2200)
@@ -4808,18 +4895,6 @@ async function openWriteWithChoiceDialog(ctx) {
       else styleStatus.textContent = t('当前环境不支持打开文件：', 'openFileByPath not available: ') + p
     } catch (e) {
       styleStatus.textContent = t('失败：', 'Failed: ') + (e && e.message ? e.message : String(e))
-    }
-  }
-
-  async function afterGeneratedProseForNewCharacters(proseText) {
-    try {
-      cfg = await loadCfg(ctx)
-      const names = await detectNewCharacterCandidates(ctx, cfg, proseText)
-      _newCharCandidates = _ainUniqNames(names)
-      renderNewCharCandidates()
-    } catch {
-      _newCharCandidates = []
-      renderNewCharCandidates()
     }
   }
 
@@ -4852,6 +4927,8 @@ async function openWriteWithChoiceDialog(ctx) {
         : t('未发现人物状态快照。', 'No state snapshot found.')
     } catch (e) {
       castStatus.textContent = t('读取失败：', 'Read failed: ') + (e && e.message ? e.message : String(e))
+    } finally {
+      try { scheduleDetectMissingStyle('state_refresh') } catch {}
     }
   }
 
@@ -5546,9 +5623,6 @@ async function openWriteWithChoiceDialog(ctx) {
         text0 = _ainMaybeTypesetWebNovel(cfg, text0)
         lastText = text0
         out.textContent = lastText || (aborted ? t('已终止（无输出）', 'Aborted (no output)') : '')
-        if (lastText) {
-          try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
-        }
         btnAgentAbort.disabled = true
         _syncAgentCtrlUiRunning()
         agentControl = null
@@ -5599,7 +5673,6 @@ async function openWriteWithChoiceDialog(ctx) {
       text0 = _ainMaybeTypesetWebNovel(cfg, text0)
       lastText = text0
       out.textContent = lastText
-      try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
       ctx.ui.notice(t('已生成正文（未写入文档）', 'Generated (not inserted)'), 'ok', 1600)
@@ -5709,9 +5782,6 @@ async function openWriteWithChoiceDialog(ctx) {
         text0 = _ainMaybeTypesetWebNovel(cfg, text0)
         lastText = text0
         out.textContent = lastText || (aborted ? t('已终止（无输出）', 'Aborted (no output)') : '')
-        if (lastText) {
-          try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
-        }
         btnAgentAbort.disabled = true
         _syncAgentCtrlUiRunning()
         agentControl = null
@@ -5762,7 +5832,6 @@ async function openWriteWithChoiceDialog(ctx) {
       text0 = _ainMaybeTypesetWebNovel(cfg, text0)
       lastText = text0
       out.textContent = lastText
-      try { void afterGeneratedProseForNewCharacters(lastText).catch(() => {}) } catch {}
       btnAppend.disabled = false
       btnAppendDraft.disabled = false
       ctx.ui.notice(t('已生成正文（未写入文档）', 'Generated (not inserted)'), 'ok', 1600)
@@ -8309,7 +8378,8 @@ function notice_mount_banner(ctx, hostEl) {
         btnToggle.onclick = () => {
           let hidden = true
           try { hidden = window.getComputedStyle(content).display === 'none' } catch {}
-          content.style.display = hidden ? '' : 'none'
+          // 注意：.ain-notice-content 默认 display:none；展开必须用显式 display 覆盖，否则设置为空字符串会继续命中 CSS 导致永远展开不了。
+          content.style.display = hidden ? 'block' : 'none'
           btnToggle.textContent = hidden ? t('收起', 'Collapse') : t('详情', 'Details')
         }
         actions.appendChild(btnToggle)

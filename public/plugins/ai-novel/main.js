@@ -4582,6 +4582,11 @@ async function openWriteWithChoiceDialog(ctx) {
   btnCastAdd.className = 'ain-btn gray'
 
   btnCastAdd.textContent = t('添加人物', 'Add')
+  // 人物列表太长时会影响操作：提供一个简单的折叠开关（默认不折叠，避免破坏旧体验）
+  let _castListCollapsed = false
+  const btnCastToggleList = document.createElement('button')
+  btnCastToggleList.className = 'ain-btn gray'
+  btnCastToggleList.textContent = t('折叠列表', 'Collapse list')
   const btnCastAll = document.createElement('button')
   btnCastAll.className = 'ain-btn gray'
   btnCastAll.textContent = t('全选', 'Select all')
@@ -4594,6 +4599,7 @@ async function openWriteWithChoiceDialog(ctx) {
   btnCastClear.textContent = t('清空', 'Clear')
   castTools.appendChild(btnCastExtract)
   castTools.appendChild(btnCastAdd)
+  castTools.appendChild(btnCastToggleList)
   castTools.appendChild(btnCastAll)
   castTools.appendChild(btnCastNone)
   castTools.appendChild(btnCastClear)
@@ -4639,6 +4645,12 @@ async function openWriteWithChoiceDialog(ctx) {
   castList.style.marginTop = '8px'
   castCard.appendChild(castList)
   sec.appendChild(castCard)
+
+  btnCastToggleList.onclick = () => {
+    _castListCollapsed = !_castListCollapsed
+    castList.style.display = _castListCollapsed ? 'none' : ''
+    btnCastToggleList.textContent = _castListCollapsed ? t('展开列表', 'Expand list') : t('折叠列表', 'Collapse list')
+  }
 
   // 人物风格（08_人物风格.md）——软约束：只影响“写得像”，不覆盖事实（事实以人物状态/主要角色为准）
   const styleCard = document.createElement('div')

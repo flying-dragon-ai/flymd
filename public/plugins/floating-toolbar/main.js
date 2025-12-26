@@ -62,10 +62,10 @@ const HEADING_IDS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
 
 const defaultPrefs = {
   autoStart: true,
-  showOnActivate: true,
+  showOnActivate: false,
   enableHeadingHotkeys: true,
   headingHotkeys: DEFAULT_HEADING_HOTKEYS,
-  onlyShowOnSelection: false
+  onlyShowOnSelection: true
 };
 
 const state = {

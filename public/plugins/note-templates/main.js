@@ -353,6 +353,94 @@ function ntEnsureSettingsStyle() {
   border-color: #eab308;
   background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
 }
+/* 移动端适配 */
+@media (max-width: 600px) {
+  /* 设置窗口全屏 */
+  .nt-dialog {
+    min-width: 95vw !important;
+    max-width: 95vw !important;
+    width: 95vw !important;
+    max-height: 95vh !important;
+    padding: 12px 14px;
+    border-radius: 0;
+  }
+
+  /* 过滤栏竖向堆叠 */
+  .nt-task-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .nt-task-filters select,
+  .nt-task-filters input[type="text"] {
+    width: 100%;
+    font-size: 16px;
+    padding: 6px 10px;
+  }
+
+  /* 日历导航按钮 */
+  .nt-calendar-nav button {
+    padding: 6px 12px;
+    font-size: 13px;
+    min-height: 44px;
+  }
+
+  /* 日历网格优化 */
+  .nt-calendar {
+    gap: 1px;
+    padding: 2px;
+  }
+  .nt-calendar-weekday {
+    font-size: 9px;
+    padding: 4px 0;
+  }
+  .nt-calendar-day {
+    min-height: 28px;
+    padding: 3px 2px;
+    gap: 1px;
+  }
+  .nt-cal-solar {
+    font-size: 11px;
+  }
+  .nt-cal-lunar {
+    font-size: 7px;
+  }
+
+  /* 任务表格适配 */
+  .nt-task-table-wrap {
+    overflow-x: auto;
+  }
+  .nt-task-table {
+    font-size: 11px;
+  }
+  .nt-task-table th,
+  .nt-task-table td {
+    padding: 4px 6px;
+    white-space: nowrap;
+  }
+  /* 隐藏复选框列（移动端用按钮操作更友好） */
+  .nt-task-select-cell {
+    display: none;
+  }
+
+  /* 按钮适配 */
+  .nt-btn {
+    padding: 8px 14px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .nt-footer {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .nt-footer button {
+    width: 100%;
+  }
+
+  /* 面板主体高度调整 */
+  .nt-panel-main {
+    max-height: 85vh;
+  }
+}
 `
   document.head.appendChild(style)
 }

@@ -20,6 +20,7 @@ import { mathInlineViewPlugin, mathBlockViewPlugin } from './plugins/math'
 import { htmlMediaPlugin } from './plugins/htmlMedia'
 import { maybeConvertHtmlTableBlocksToGfm } from './plugins/htmlTable'
 import { remarkMathPlugin, katexOptionsCtx, mathInlineSchema, mathBlockSchema, mathInlineInputRule, mathBlockInputRule } from '@milkdown/plugin-math'
+import { liftListItem, sinkListItem } from 'prosemirror-schema-list'
 // 注：保留 automd 插件以提供编辑功能，通过 CSS 隐藏其 UI 组件
 // 引入富文本所见视图的必要样式（避免工具条/布局错乱导致不可编辑/不可滚动）
 // 注：不直接导入 @milkdown/crepe/style.css，避免 Vite 对未导出的样式路径解析失败。
@@ -508,6 +509,31 @@ export async function wysiwygV2ReplaceAll(markdown: string) {
 // - 全部替换：单事务从后往前批量替换，避免位置偏移；
 
 function _getView(): any { try { return (_editor as any)?.ctx?.get?.(editorViewCtx) } catch { return null } }
+
+// 所见模式：列表项 Tab/Shift+Tab 缩进（次级列表/反缩进）
+// 返回 true 表示“当前选区在列表项中，已尝试处理（无论是否真正发生缩进）”，外层应停止再做 &emsp; 段落缩进。
+export function wysiwygV2HandleListTab(outdent: boolean): boolean {
+  try {
+    const view = _getView()
+    if (!view) return false
+    const state = view.state
+    const listItemType: any = (state as any)?.schema?.nodes?.list_item
+    if (!listItemType) return false
+    const sel: any = state.selection as any
+    const $from: any = sel?.$from
+    if (!$from) return false
+    let inListItem = false
+    for (let d = $from.depth; d > 0; d--) {
+      if ($from.node(d)?.type === listItemType) { inListItem = true; break }
+    }
+    if (!inListItem) return false
+
+    const cmd = outdent ? liftListItem(listItemType) : sinkListItem(listItemType)
+    try { cmd(state as any, view.dispatch, view) } catch {}
+    try { view.focus() } catch {}
+    return true
+  } catch { return false }
+}
 // 所见模式内“粘贴 URL 自动抓取标题”逻辑：在 ProseMirror 文档上直接构造/更新链接节点
 async function handleWysiwygPasteUrl(url: string) {
   const href = String(url || '').trim()
@@ -759,6 +785,84 @@ function setupBracketPairingForWysiwyg(pm: HTMLElement | null) {
 
   const handleKeydown = (ev: KeyboardEvent) => {
     try {
+      // 列表：行首 Backspace 退一层（或退出列表）
+      // 目的：避免“删掉缩进后仍在缩进层级里继续输入”的诡异体验。
+      if (ev.key === 'Backspace') {
+        if (ev.ctrlKey || ev.metaKey || ev.altKey) return
+        if ((ev as any).isComposing) return
+        const view = _getView()
+        if (!view) return
+        const state = view.state
+        const sel: any = state.selection as any
+        if (!(sel instanceof TextSelection)) return
+        // 只在光标折叠且位于当前文本块行首时介入
+        if (!sel.empty) return
+        const $from: any = sel.$from
+        if (!$from) return
+        if (($from.parentOffset >>> 0) !== 0) return
+        // 代码块里不要动
+        const parent: any = $from.parent
+        const typeName: string | undefined = parent?.type?.name
+        if (typeName === 'code_block') return
+
+        // 表格里 Backspace 交给编辑器默认行为
+        for (let d = $from.depth; d > 0; d--) {
+          const name = $from.node(d)?.type?.name
+          if (!name) continue
+          if (name === 'table' || name === 'table_row' || name === 'table_cell' || name === 'table_header') return
+        }
+
+        const listItemType: any = (state as any).schema?.nodes?.list_item
+        if (listItemType) {
+          let inListItem = false
+          for (let d = $from.depth; d > 0; d--) {
+            if ($from.node(d)?.type === listItemType) { inListItem = true; break }
+          }
+          if (inListItem) {
+            const handled = liftListItem(listItemType)(state as any, view.dispatch, view)
+            if (handled) {
+              ev.preventDefault()
+              try { ev.stopPropagation() } catch {}
+              try { (ev as any).stopImmediatePropagation?.() } catch {}
+              try { view.focus() } catch {}
+              return
+            }
+          }
+        }
+      }
+
+      // 所见模式：列表 Tab 缩进到次级列表，Shift+Tab 反缩进
+      // 只在列表项里接管 Tab，避免影响表格单元格 Tab 导航、以及其它既有 Tab 行为
+      if (ev.key === 'Tab') {
+        if (ev.ctrlKey || ev.metaKey || ev.altKey) return
+
+        const view = _getView()
+        if (!view) return
+        const state = view.state
+        const sel: any = state.selection as any
+        const $from: any = sel?.$from
+        if (!$from) return
+
+        // 表格中 Tab 通常用于单元格切换，这里完全不干预
+        for (let d = $from.depth; d > 0; d--) {
+          const name = $from.node(d)?.type?.name
+          if (!name) continue
+          if (name === 'table' || name === 'table_row' || name === 'table_cell' || name === 'table_header') return
+        }
+
+        const listItemType: any = (state as any).schema?.nodes?.list_item
+        if (!listItemType) return
+
+        const cmd = ev.shiftKey ? liftListItem(listItemType) : sinkListItem(listItemType)
+        const handled = cmd(state as any, view.dispatch, view)
+        if (handled) {
+          ev.preventDefault()
+          try { ev.stopPropagation() } catch {}
+          try { (ev as any).stopImmediatePropagation?.() } catch {}
+        }
+        return
+      }
+
       if (ev.key !== 'Backspace') return
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return
       // 组合输入阶段不介入

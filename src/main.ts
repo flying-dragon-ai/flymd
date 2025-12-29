@@ -15,7 +15,7 @@ import { t, fmtStatus, getLocalePref, setLocalePref, getLocale, tLocale } from '
 import type MarkdownIt from 'markdown-it'
 import type { LocalePref } from './i18n'
 // WYSIWYG: 锚点插件与锚点同步（用于替换纯比例同步）
-import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2GetSelectedText, wysiwygV2FindNext, wysiwygV2FindPrev, wysiwygV2ReplaceOne as wysiwygV2ReplaceOneSel, wysiwygV2ReplaceAllInDoc, wysiwygV2ReplaceAll } from './wysiwyg/v2/index'
+import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2GetSelectedText, wysiwygV2FindNext, wysiwygV2FindPrev, wysiwygV2ReplaceOne as wysiwygV2ReplaceOneSel, wysiwygV2ReplaceAllInDoc, wysiwygV2ReplaceAll, wysiwygV2HandleListTab } from './wysiwyg/v2/index'
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
@@ -6706,6 +6706,15 @@ function bindEvents() {
           const tgt = e.target as HTMLElement | null
           const rootEl = document.getElementById('md-wysiwyg-root')
           if (!rootEl || !tgt || !rootEl.contains(tgt)) return
+
+          // 列表项优先：Tab 缩进到次级列表，Shift+Tab 反缩进
+          // 这里必须先处理，否则后续的 &emsp; 段落缩进会把 Tab “吃掉”，导致列表永远只有一层。
+          const inList = (() => { try { return wysiwygV2HandleListTab(!!ev.shiftKey) } catch { return false } })()
+          if (inList) {
+            ev.preventDefault(); try { ev.stopPropagation() } catch {} ; try { (e as any).stopImmediatePropagation && (e as any).stopImmediatePropagation() } catch {}
+            return
+          }
+
           ev.preventDefault(); try { ev.stopPropagation() } catch {} ; try { (e as any).stopImmediatePropagation && (e as any).stopImmediatePropagation() } catch {}
 
           const em = '&emsp;&emsp;'

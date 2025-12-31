@@ -2,6 +2,10 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v0.9.1
+- Improved: In WYSIWYG mode, ordered/unordered list items support Tab to indent (nest) and Shift+Tab to outdent
+- Improved: In WYSIWYG mode, Backspace at the start of a list item outdents (or exits the list)
+
 ## Update v0.9.0
 - Added: New “Speech Transcribe” under Plugins: start/stop microphone transcription, transcribe an audio file, transcription settings (official backend proxy + custom model)
 - Added: New “ASR Notes” under Plugins: streaming dictation to notes, with sign-in, remaining minutes, recharge and redeem code

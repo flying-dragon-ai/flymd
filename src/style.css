@@ -1397,10 +1397,17 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   font-weight: 500;
 }
 
-/* 隐藏大纲标题序号 */
+/* 大纲折叠/展开开关（H1/H2 有子级时显示） */
 .lib-outline .ol-tg {
-  display: none;
+  display: inline-block;
+  width: 14px;
+  margin-right: 4px;
+  text-align: center;
+  color: var(--muted);
+  user-select: none;
 }
+.lib-outline .ol-tg[data-idx] { cursor: pointer; }
+.lib-outline .ol-tg:not([data-idx]) { opacity: 0; pointer-events: none; }
 
 .lib-outline .lvl-1 {
   margin-left: 0;
@@ -6020,8 +6027,11 @@ body.focus-mode .library .lib-outline .ol-item:hover {
   transform: none !important;
 }
 
-body.focus-mode .library .lib-outline .ol-tg {
-  display: none !important;
+body.focus-mode .library .lib-outline .ol-tg[data-idx] {
+  opacity: 0.35;
+}
+body.focus-mode .library .lib-outline .ol-item:hover .ol-tg[data-idx] {
+  opacity: 0.7;
 }
 
 /* 库按钮纯文字样式 */

@@ -3169,7 +3169,29 @@ function ensureDialogStyle() {
   radial-gradient(900px 450px at 10% 0%, rgba(59,130,246,.08), transparent 60%),
   radial-gradient(700px 380px at 90% 0%, rgba(148,163,184,.10), transparent 60%),
   #1e293b;
-border:1px solid #334155;border-radius:10px;padding:12px;margin:12px 0;display:flex;flex-direction:column;gap:10px;height:min(72vh,640px)}
+border:1px solid #334155;border-radius:10px;padding:12px;margin:12px 0;display:flex;flex-direction:column;gap:10px;height:min(72vh,640px);position:relative}
+.ain-chat-sbar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ain-chat-sinfo{min-width:0;display:flex;flex-direction:column;gap:2px}
+.ain-chat-stitle{font-weight:700;color:#f1f5f9;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ain-chat-smeta{color:#94a3b8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ain-chat-sactions{display:flex;gap:8px;align-items:center;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end}
+.ain-chat-sbtn{background:rgba(148,163,184,.10);border:1px solid rgba(148,163,184,.22);color:#e2e8f0;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px}
+.ain-chat-sbtn:hover{background:rgba(148,163,184,.16)}
+.ain-chat-sbtn.danger{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.35)}
+.ain-chat-sbtn.danger:hover{background:rgba(239,68,68,.18)}
+.ain-chat-panel{position:absolute;inset:12px;background:rgba(2,6,23,.92);border:1px solid rgba(148,163,184,.22);border-radius:12px;backdrop-filter:blur(6px);display:none;flex-direction:column;overflow:hidden;z-index:2}
+.ain-chat-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(148,163,184,.18)}
+.ain-chat-panel-title{font-weight:700;color:#f1f5f9;font-size:13px}
+.ain-chat-panel-list{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+.ain-chat-sitem{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid rgba(148,163,184,.18);background:rgba(15,23,42,.55);cursor:pointer}
+.ain-chat-sitem:hover{border-color:rgba(59,130,246,.35);background:rgba(15,23,42,.72)}
+.ain-chat-sitem-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.ain-chat-sitem-title{font-weight:700;color:#e2e8f0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ain-chat-sitem-sub{color:#94a3b8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ain-chat-sitem-actions{display:flex;gap:8px;align-items:center;flex:0 0 auto}
+.ain-chat-sitem-btn{background:transparent;border:0;color:#8ab4ff;cursor:pointer;padding:0 2px;font-size:12px}
+.ain-chat-sitem-btn:hover{text-decoration:underline}
+.ain-chat-sitem-btn.danger{color:#fca5a5}
 .ain-chat-list{flex:1;min-height:240px;overflow:auto;padding:14px 12px;background:
   radial-gradient(1200px 600px at 20% 0%, rgba(59,130,246,.10), transparent 55%),
   radial-gradient(900px 500px at 80% 10%, rgba(34,197,94,.08), transparent 55%),
@@ -10135,8 +10157,181 @@ async function openConsultDialog(ctx) {
 
   const { body } = createDialogShell(t('写作咨询', 'Writing consult'))
 
+  const CONSULT_SESS_LS_KEY = 'aiNovel.consult.sessions.v1'
+  const CONSULT_MAX_SESSIONS = 40
+  const CONSULT_MAX_MSGS_PER_SESSION = 240
+  const CONSULT_INTRO = t('把问题发给我，我会结合进度/设定/前文来聊。', 'Ask me; I will answer with context (no continuation).')
+
+  function _consultNow() {
+    return Date.now()
+  }
+
+  function _consultGenId() {
+    try {
+      if (globalThis && globalThis.crypto && typeof globalThis.crypto.getRandomValues === 'function') {
+        const buf = new Uint8Array(10)
+        globalThis.crypto.getRandomValues(buf)
+        return Array.from(buf).map((x) => x.toString(16).padStart(2, '0')).join('')
+      }
+    } catch {}
+    return String(Date.now()) + '-' + Math.random().toString(16).slice(2)
+  }
+
+  function _consultFmtTs(ts) {
+    const t0 = Number(ts) || 0
+    if (!t0) return ''
+    try {
+      const d = new Date(t0)
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      const hh = String(d.getHours()).padStart(2, '0')
+      const mm = String(d.getMinutes()).padStart(2, '0')
+      return `${y}-${m}-${day} ${hh}:${mm}`
+    } catch {}
+    return ''
+  }
+
+  function _consultSafeJsonParse(s) {
+    try {
+      const j = _ainTryParseJson(String(s || ''))
+      return j && typeof j === 'object' ? j : null
+    } catch {}
+    return null
+  }
+
+  function _consultLoadStore() {
+    try {
+      const raw = localStorage.getItem(CONSULT_SESS_LS_KEY)
+      const j = _consultSafeJsonParse(raw)
+      const sess = (j && Array.isArray(j.sessions)) ? j.sessions : []
+      const currentId = (j && typeof j.currentId === 'string') ? j.currentId : ''
+      const cleaned = []
+      for (let i = 0; i < sess.length; i++) {
+        const it = sess[i] && typeof sess[i] === 'object' ? sess[i] : null
+        if (!it) continue
+        const id = safeText(it.id).trim()
+        if (!id) continue
+        const title = safeText(it.title).trim() || t('新会话', 'New chat')
+        const createdAt = Number(it.createdAt) || _consultNow()
+        const updatedAt = Number(it.updatedAt) || createdAt
+        const msgs0 = Array.isArray(it.messages) ? it.messages : []
+        const messages = []
+        for (let k = 0; k < msgs0.length; k++) {
+          const m = msgs0[k] && typeof msgs0[k] === 'object' ? msgs0[k] : null
+          if (!m) continue
+          const role = m.role === 'user' ? 'user' : (m.role === 'assistant' ? 'assistant' : '')
+          const content = safeText(m.content)
+          if (!role || !content) continue
+          messages.push({ role, content, ts: Number(m.ts) || 0, uiOnly: !!m.uiOnly })
+        }
+        cleaned.push({ id, title, createdAt, updatedAt, messages })
+      }
+      cleaned.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      return { currentId, sessions: cleaned.slice(0, CONSULT_MAX_SESSIONS) }
+    } catch {}
+    return { currentId: '', sessions: [] }
+  }
+
+  function _consultSaveStore(store) {
+    const s = store && typeof store === 'object' ? store : {}
+    const sessions0 = Array.isArray(s.sessions) ? s.sessions : []
+    const sessions = sessions0.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, CONSULT_MAX_SESSIONS)
+    for (let i = 0; i < sessions.length; i++) {
+      const it = sessions[i]
+      if (!it || typeof it !== 'object') continue
+      if (!Array.isArray(it.messages)) it.messages = []
+      if (it.messages.length > CONSULT_MAX_MSGS_PER_SESSION) it.messages = it.messages.slice(it.messages.length - CONSULT_MAX_MSGS_PER_SESSION)
+    }
+    const out = { currentId: safeText(s.currentId).trim(), sessions }
+    try { localStorage.setItem(CONSULT_SESS_LS_KEY, JSON.stringify(out)) } catch {}
+    return out
+  }
+
+  function _consultNewSession(seedTitle) {
+    const now = _consultNow()
+    return {
+      id: _consultGenId(),
+      title: safeText(seedTitle).trim() || t('新会话', 'New chat'),
+      createdAt: now,
+      updatedAt: now,
+      messages: []
+    }
+  }
+
+  function _consultEnsureIntro(sess) {
+    if (!sess || typeof sess !== 'object') return
+    const msgs = Array.isArray(sess.messages) ? sess.messages : []
+    if (msgs.length) return
+    sess.messages = [{ role: 'assistant', content: CONSULT_INTRO, ts: _consultNow(), uiOnly: true }]
+  }
+
+  function _consultGetLastNonUiMessage(sess) {
+    const msgs = sess && Array.isArray(sess.messages) ? sess.messages : []
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (!m || m.uiOnly) continue
+      return m
+    }
+    return null
+  }
+
+  function _consultPreviewText(sess) {
+    const m = _consultGetLastNonUiMessage(sess)
+    const s = safeText(m && m.content).trim().replace(/\s+/g, ' ')
+    if (!s) return t('暂无消息', 'No messages')
+    return s.length > 60 ? (s.slice(0, 60) + '…') : s
+  }
+
   const sec = document.createElement('div')
   sec.className = 'ain-chat'
+
+  const sbar = document.createElement('div')
+  sbar.className = 'ain-chat-sbar'
+
+  const sinfo = document.createElement('div')
+  sinfo.className = 'ain-chat-sinfo'
+  const sTitle = document.createElement('div')
+  sTitle.className = 'ain-chat-stitle'
+  const sMeta = document.createElement('div')
+  sMeta.className = 'ain-chat-smeta'
+  sinfo.appendChild(sTitle)
+  sinfo.appendChild(sMeta)
+
+  const sActions = document.createElement('div')
+  sActions.className = 'ain-chat-sactions'
+  const btnSess = document.createElement('button')
+  btnSess.className = 'ain-chat-sbtn'
+  btnSess.textContent = t('历史', 'History')
+  const btnNewSess = document.createElement('button')
+  btnNewSess.className = 'ain-chat-sbtn'
+  btnNewSess.textContent = t('新会话', 'New')
+  const btnDelSess = document.createElement('button')
+  btnDelSess.className = 'ain-chat-sbtn danger'
+  btnDelSess.textContent = t('删除会话', 'Delete')
+  sActions.appendChild(btnSess)
+  sActions.appendChild(btnNewSess)
+  sActions.appendChild(btnDelSess)
+
+  sbar.appendChild(sinfo)
+  sbar.appendChild(sActions)
+
+  const panel = document.createElement('div')
+  panel.className = 'ain-chat-panel'
+  const panelHead = document.createElement('div')
+  panelHead.className = 'ain-chat-panel-head'
+  const panelTitle = document.createElement('div')
+  panelTitle.className = 'ain-chat-panel-title'
+  panelTitle.textContent = t('历史会话', 'Chat history')
+  const panelClose = document.createElement('button')
+  panelClose.className = 'ain-chat-sbtn'
+  panelClose.textContent = t('关闭', 'Close')
+  panelHead.appendChild(panelTitle)
+  panelHead.appendChild(panelClose)
+  const panelList = document.createElement('div')
+  panelList.className = 'ain-chat-panel-list'
+  panel.appendChild(panelHead)
+  panel.appendChild(panelList)
 
   const out = document.createElement('div')
   out.className = 'ain-chat-list'
@@ -10171,12 +10366,16 @@ async function openConsultDialog(ctx) {
   rowIn.appendChild(q)
   rowIn.appendChild(actions)
 
+  sec.appendChild(sbar)
   sec.appendChild(out)
   sec.appendChild(rowIn)
+  sec.appendChild(panel)
   body.appendChild(sec)
 
   let lastAdvice = ''
-  let history = [] // {role:'user'|'assistant', content:string}
+  let store = _consultLoadStore()
+  let sessions = Array.isArray(store.sessions) ? store.sessions : []
+  let session = null
 
   function appendChat(role, text, opt) {
     const o = (opt && typeof opt === 'object') ? opt : {}
@@ -10205,27 +10404,138 @@ async function openConsultDialog(ctx) {
 
     if (o.pending) wrap.dataset.ainPending = '1'
     out.appendChild(wrap)
-    try { out.scrollTop = out.scrollHeight } catch {}
+    if (!o.noScroll) {
+      try { out.scrollTop = out.scrollHeight } catch {}
+    }
     return { wrap, content }
   }
 
-  function clearChat() {
-    history = []
+  function _consultPersist() {
+    store = _consultSaveStore({ currentId: store.currentId, sessions })
+    sessions = Array.isArray(store.sessions) ? store.sessions : sessions
+  }
+
+  function _consultPickCurrent() {
+    const curId = safeText(store.currentId).trim()
+    let cur = null
+    if (curId) {
+      for (let i = 0; i < sessions.length; i++) {
+        if (sessions[i] && sessions[i].id === curId) { cur = sessions[i]; break }
+      }
+    }
+    if (!cur && sessions.length) cur = sessions[0]
+    if (!cur) {
+      cur = _consultNewSession('')
+      sessions.unshift(cur)
+    }
+    _consultEnsureIntro(cur)
+    store.currentId = cur.id
+    _consultPersist()
+    session = cur
+  }
+
+  function _consultUpdateBar() {
+    const s = session
+    const title = safeText(s && s.title).trim() || t('新会话', 'New chat')
+    const cnt = s && Array.isArray(s.messages) ? s.messages.filter((m) => m && !m.uiOnly).length : 0
+    sTitle.textContent = title
+    sMeta.textContent = t('消息 ', 'Messages ') + String(cnt) + (s && s.updatedAt ? (' · ' + _consultFmtTs(s.updatedAt)) : '')
+  }
+
+  function _consultRenderSession() {
+    out.innerHTML = ''
+    const s = session
+    const msgs = s && Array.isArray(s.messages) ? s.messages : []
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i]
+      if (!m) continue
+      appendChat(m.role === 'user' ? 'user' : 'assistant', safeText(m.content), { noScroll: true })
+    }
+    try { out.scrollTop = out.scrollHeight } catch {}
+    _consultUpdateBar()
+  }
+
+  function _consultOpenPanel() {
+    panelList.innerHTML = ''
+    const arr = sessions.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    for (let i = 0; i < arr.length; i++) {
+      const s = arr[i]
+      if (!s) continue
+      const item = document.createElement('div')
+      item.className = 'ain-chat-sitem'
+      const main = document.createElement('div')
+      main.className = 'ain-chat-sitem-main'
+      const ttl = document.createElement('div')
+      ttl.className = 'ain-chat-sitem-title'
+      ttl.textContent = safeText(s.title).trim() || t('新会话', 'New chat')
+      const sub = document.createElement('div')
+      sub.className = 'ain-chat-sitem-sub'
+      const dt = _consultFmtTs(s.updatedAt || s.createdAt)
+      sub.textContent = (dt ? (dt + ' · ') : '') + _consultPreviewText(s)
+      main.appendChild(ttl)
+      main.appendChild(sub)
+
+      const acts = document.createElement('div')
+      acts.className = 'ain-chat-sitem-actions'
+      const btnRemove = document.createElement('button')
+      btnRemove.className = 'ain-chat-sitem-btn danger'
+      btnRemove.textContent = t('删除', 'Delete')
+      acts.appendChild(btnRemove)
+
+      item.appendChild(main)
+      item.appendChild(acts)
+
+      item.onclick = () => {
+        store.currentId = s.id
+        _consultPersist()
+        _consultPickCurrent()
+        _consultRenderSession()
+        panel.style.display = 'none'
+        try { q.focus() } catch {}
+      }
+
+      btnRemove.onclick = (e) => {
+        try { e.stopPropagation() } catch {}
+        const ok = (typeof window !== 'undefined' && window.confirm)
+          ? window.confirm(t('确认删除该会话？删除后不可恢复。', 'Delete this session? This cannot be undone.'))
+          : true
+        if (!ok) return
+        const id = s.id
+        sessions = sessions.filter((x) => x && x.id !== id)
+        if (store.currentId === id) store.currentId = ''
+        _consultPersist()
+        _consultPickCurrent()
+        _consultRenderSession()
+        _consultOpenPanel()
+      }
+
+      panelList.appendChild(item)
+    }
+    panel.style.display = 'flex'
+  }
+
+  function _consultClearCurrent() {
     lastAdvice = ''
     btnAppend.disabled = true
-    out.innerHTML = ''
-    appendChat('assistant', t('把问题发给我，我会结合进度/设定/前文来聊。', 'Ask me; I will answer with context (no continuation).'))
+    if (!session) return
+    session.messages = []
+    _consultEnsureIntro(session)
+    session.updatedAt = _consultNow()
+    _consultPersist()
+    _consultRenderSession()
   }
 
   function trimHistory(maxMsgs) {
     const lim = Math.max(0, maxMsgs | 0)
     if (!lim) return []
-    const arr = Array.isArray(history) ? history : []
+    const msgs = session && Array.isArray(session.messages) ? session.messages : []
+    const arr = msgs.filter((m) => m && !m.uiOnly && (m.role === 'user' || m.role === 'assistant')).map((m) => ({ role: m.role, content: m.content }))
     if (arr.length <= lim) return arr
     return arr.slice(arr.length - lim)
   }
 
-  clearChat()
+  _consultPickCurrent()
+  _consultRenderSession()
 
   async function doAsk() {
     if (btnAsk && btnAsk.disabled) return
@@ -10251,7 +10561,17 @@ async function openConsultDialog(ctx) {
     btnAppend.disabled = true
     lastAdvice = ''
 
-    history.push({ role: 'user', content: question })
+    if (!session) _consultPickCurrent()
+    const now = _consultNow()
+    if (!safeText(session.title).trim() || safeText(session.title).trim() === t('新会话', 'New chat')) {
+      const t0 = question.length > 24 ? (question.slice(0, 24) + '…') : question
+      session.title = t0
+    }
+    session.messages = Array.isArray(session.messages) ? session.messages : []
+    session.messages.push({ role: 'user', content: question, ts: now, uiOnly: false })
+    session.updatedAt = now
+    _consultPersist()
+
     appendChat('user', question)
     const pending = appendChat('assistant', t('思考中…', 'Thinking...'), { pending: true })
     try {
@@ -10294,7 +10614,10 @@ async function openConsultDialog(ctx) {
       lastAdvice = reply
       if (!lastAdvice) throw new Error(t('上游未返回内容', 'Upstream returned empty text'))
 
-      history.push({ role: 'assistant', content: lastAdvice })
+      session.messages.push({ role: 'assistant', content: lastAdvice, ts: _consultNow(), uiOnly: false })
+      session.updatedAt = _consultNow()
+      _consultPersist()
+      _consultUpdateBar()
       try { if (pending && pending.wrap && pending.wrap.parentNode) pending.wrap.parentNode.removeChild(pending.wrap) } catch {}
       appendChat('assistant', lastAdvice)
       btnAppend.disabled = false
@@ -10307,8 +10630,36 @@ async function openConsultDialog(ctx) {
     }
   }
 
+  btnSess.onclick = () => { try { _consultOpenPanel() } catch {} }
+  panelClose.onclick = () => { try { panel.style.display = 'none' } catch {} }
+  btnNewSess.onclick = () => {
+    try {
+      const s = _consultNewSession('')
+      _consultEnsureIntro(s)
+      sessions.unshift(s)
+      store.currentId = s.id
+      _consultPersist()
+      _consultPickCurrent()
+      _consultRenderSession()
+      try { q.focus() } catch {}
+    } catch {}
+  }
+  btnDelSess.onclick = () => {
+    if (!session) return
+    const ok = (typeof window !== 'undefined' && window.confirm)
+      ? window.confirm(t('确认删除当前会话？删除后不可恢复。', 'Delete current session? This cannot be undone.'))
+      : true
+    if (!ok) return
+    const id = session.id
+    sessions = sessions.filter((x) => x && x.id !== id)
+    store.currentId = ''
+    _consultPersist()
+    _consultPickCurrent()
+    _consultRenderSession()
+  }
+
   btnAsk.onclick = () => { doAsk().catch(() => {}) }
-  btnClear.onclick = () => { try { clearChat() } catch {} }
+  btnClear.onclick = () => { try { _consultClearCurrent() } catch {} }
   btnAppend.onclick = () => {
     try {
       if (!lastAdvice) return
@@ -12562,7 +12913,21 @@ export function activate(context) {
     __CTX_MENU_DISPOSER__ = null
     try {
       if (typeof context.addContextMenuItem === 'function') {
-        __CTX_MENU_DISPOSER__ = context.addContextMenuItem({
+        const disposers = []
+        try {
+          const d1 = context.addContextMenuItem({
+            label: t('写作咨询', 'Writing consult'),
+            icon: '✍️',
+            condition: (ctx) => {
+              if (!ctx) return true
+              return ctx.mode === 'edit' || ctx.mode === 'wysiwyg'
+            },
+            onClick: () => { void openConsultDialog(context) }
+          })
+          if (typeof d1 === 'function') disposers.push(d1)
+        } catch {}
+
+        const d2 = context.addContextMenuItem({
           label: t('小说引擎', 'Novel Engine'),
           icon: '📚',
           condition: (ctx) => {
@@ -12588,6 +12953,12 @@ export function activate(context) {
             },
           ]
         })
+        if (typeof d2 === 'function') disposers.push(d2)
+        __CTX_MENU_DISPOSER__ = () => {
+          for (let i = 0; i < disposers.length; i++) {
+            try { disposers[i]() } catch {}
+          }
+        }
       }
     } catch (e) {
       try { console.error('[ai-novel] 注册右键菜单失败：', e) } catch {}

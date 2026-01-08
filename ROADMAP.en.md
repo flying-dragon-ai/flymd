@@ -2,6 +2,14 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.0.1
+- Fixed: When printing documents containing KaTeX, wait for CSS to load to prevent formula styling loss
+- Added: Outline layout button
+- Improved: Auto-detect whether the current document has an outline and auto show/hide the outline panel
+- Improved: Highlight the icon of the active tab
+- Improved: Metadata/file-tree UI tweaks; sidebar buttons switched to icon style
+- Improved: Built-in “AI Novel Engine” plugin upgraded to v0.6.4: added fully-automated mode, refined the execution logic, bundled Jina embedding models, and added a quick-jump API
+
 ## Update v0.9.9
 - Added: “Print” entry in the editor right-click menu
 - Fixed: Print rendering issues introduced by the new UI (render via an isolated iframe to avoid blank/incomplete prints)

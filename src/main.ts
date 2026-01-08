@@ -156,6 +156,11 @@ import {
   type PluginContextMenuItem,
 } from './ui/contextMenus'
 import {
+  setOutlineHasContent,
+  shouldUpdateOutlinePanel,
+  syncDetachedOutlineVisibility,
+} from './ui/outlineAutoHide'
+import {
   openPluginMenuManager,
   type PluginMenuManagerHost,
 } from './extensions/pluginMenuManager'
@@ -1959,7 +1964,7 @@ async function setWysiwygEnabled(enable: boolean) {
         // 若大纲面板当前可见，切换到所见模式后立即刷新大纲，并绑定观察/滚动
         try {
           const outline = document.getElementById('lib-outline') as HTMLDivElement | null
-          if (outline && !outline.classList.contains('hidden')) {
+          if (outline && shouldUpdateOutlinePanel(outlineLayout, outline)) {
             _outlineLastSignature = ''
             renderOutlinePanel()
             ensureOutlineObserverBound()
@@ -2015,7 +2020,7 @@ async function setWysiwygEnabled(enable: boolean) {
       // 若大纲面板当前可见，退出所见模式后也立即刷新大纲并绑定预览滚动同步
       try {
         const outline = document.getElementById('lib-outline') as HTMLDivElement | null
-        if (outline && !outline.classList.contains('hidden')) {
+        if (outline && shouldUpdateOutlinePanel(outlineLayout, outline)) {
           _outlineLastSignature = ''
           // 预览渲染可能稍后完成，延迟一次以确保提取到标题
           setTimeout(() => { try { renderOutlinePanel(); bindOutlineScrollSync() } catch {} }, 0)
@@ -3856,7 +3861,7 @@ async function toggleMode() {
   // 模式切换后，如大纲面板可见，强制按当前模式重建一次大纲
   try {
     const outline = document.getElementById('lib-outline') as HTMLDivElement | null
-    if (outline && !outline.classList.contains('hidden')) {
+    if (outline && shouldUpdateOutlinePanel(outlineLayout, outline)) {
       _outlineLastSignature = ''
       renderOutlinePanel()
       if (mode !== 'edit') bindOutlineScrollSync()
@@ -4032,7 +4037,7 @@ async function showPdfPreview(filePathRaw: string, opts?: { updateRecent?: boole
   // 若大纲面板当前可见，切到 PDF 后刷新一次（避免显示上一个文档的大纲）
   try {
     const outline = document.getElementById('lib-outline') as HTMLDivElement | null
-    if (outline && !outline.classList.contains('hidden')) {
+    if (outline && shouldUpdateOutlinePanel(outlineLayout, outline)) {
       _outlineLastSignature = ''
       setTimeout(() => { try { renderOutlinePanel() } catch {} }, 0)
     }
@@ -4545,6 +4550,7 @@ function renderOutlinePanel() {
   try {
     const outline = document.getElementById('lib-outline') as HTMLDivElement | null
     if (!outline) return
+    const container = document.querySelector('.container') as HTMLDivElement | null
     // PDF：优先读取书签目录
     try { if ((currentFilePath || '').toLowerCase().endsWith('.pdf')) { void renderPdfOutline(outline); return } } catch {}
     // 优先从当前上下文（WYSIWYG/预览）提取标题（仅在对应模式下启用）
@@ -4581,17 +4587,24 @@ function renderOutlinePanel() {
         offset += ln.length + 1
       })
     }
-    if (items.length === 0) { outline.innerHTML = '<div class="empty">未检测到标题</div>'; return }
+
+    setOutlineHasContent(outline, items.length > 0)
+    const layoutChanged = syncDetachedOutlineVisibility(outlineLayout, container, outline)
+    if (layoutChanged) notifyWorkspaceLayoutChanged()
 
     // 缓存命中：若本次大纲签名与上次相同，跳过重建，仅更新高亮
     try {
-      const sig = JSON.stringify(items.map(it => [it.level, it.id, it.text]))
+      // 多标签切换会在同一会话内渲染多个文档：签名必须包含路径，避免误命中缓存
+      const key = String(currentFilePath || 'untitled')
+      const sig = key + '::' + JSON.stringify(items.map(it => [it.level, it.id, it.text]))
       if (sig === _outlineLastSignature && outline.childElementCount > 0) {
         updateOutlineActive();
         return
       }
       _outlineLastSignature = sig
     } catch {}
+
+    if (items.length === 0) { outline.innerHTML = '<div class="empty">未检测到标题</div>'; return }
 
     // 计算是否有子级（用于折叠/展开，限制到 H1/H2）
     const hasChild = new Map<string, boolean>()
@@ -4701,8 +4714,17 @@ function renderOutlinePanel() {
 async function renderPdfOutline(outlineEl: HTMLDivElement) {
   try {
     outlineEl.innerHTML = '<div class="empty">正在读取 PDF 目录…</div>'
+    // PDF 目录加载/错误信息也需要可见（剥离布局下不然用户啥都看不到）
+    setOutlineHasContent(outlineEl, true)
+    const container = document.querySelector('.container') as HTMLDivElement | null
+    if (syncDetachedOutlineVisibility(outlineLayout, container, outlineEl)) notifyWorkspaceLayoutChanged()
     const filePath = String(currentFilePath || '')
-    if (!filePath) { outlineEl.innerHTML = '<div class="empty">未打开 PDF</div>'; return }
+    if (!filePath) {
+      setOutlineHasContent(outlineEl, false)
+      if (syncDetachedOutlineVisibility(outlineLayout, container, outlineEl)) notifyWorkspaceLayoutChanged()
+      outlineEl.innerHTML = '<div class="empty">未打开 PDF</div>'
+      return
+    }
 
     const cacheKey = filePath.replace(/\\/g, '/')
     let curMtime = 0
@@ -4715,7 +4737,10 @@ async function renderPdfOutline(outlineEl: HTMLDivElement) {
     const escHtml = (s: string) => String(s || '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' } as any)[ch] || ch)
 
     const renderItems = (items: Array<{ level: number; title: string; page: number }>, fromCache: boolean) => {
-      if (!items || items.length === 0) { outlineEl.innerHTML = '<div class="empty">目录为空</div>'; return }
+      const hasContent = !!(items && items.length > 0)
+      setOutlineHasContent(outlineEl, hasContent)
+      if (syncDetachedOutlineVisibility(outlineLayout, container, outlineEl)) notifyWorkspaceLayoutChanged()
+      if (!hasContent) { outlineEl.innerHTML = '<div class="empty">目录为空</div>'; return }
 
       // 计算是否有子级（用于折叠/展开，限制到 level<=2）
       const hasChild = new Map<string, boolean>()
@@ -4943,7 +4968,7 @@ function scheduleOutlineUpdate() {
     _outlineUpdateTimer = 0
     try {
       const outline = document.getElementById('lib-outline') as HTMLDivElement | null
-      if (outline && !outline.classList.contains('hidden')) renderOutlinePanel()
+      if (shouldUpdateOutlinePanel(outlineLayout, outline)) renderOutlinePanel()
     } catch {}
   }, 200)
 }
@@ -5225,33 +5250,48 @@ function syncLibraryFloatToggle() {
   // 根据当前大纲布局模式应用布局（大纲剥离/嵌入）
 function applyOutlineLayout() {
   try {
-      const container = document.querySelector('.container') as HTMLDivElement | null
-      const libraryEl = document.getElementById('library') as HTMLDivElement | null
-      const outlineEl = document.getElementById('lib-outline') as HTMLDivElement | null
-      if (!container || !outlineEl) return
-      // 默认：嵌入库侧栏（与旧行为一致）
-      if (outlineLayout === 'embedded') {
-        if (libraryEl && outlineEl.parentElement !== libraryEl) {
-          libraryEl.appendChild(outlineEl)
-        }
-        outlineEl.classList.remove('outline-floating', 'side-left', 'side-right')
-        container.classList.remove('with-outline-left', 'with-outline-right')
-        notifyWorkspaceLayoutChanged()
-        return
+    const container = document.querySelector('.container') as HTMLDivElement | null
+    const libraryEl = document.getElementById('library') as HTMLDivElement | null
+    const outlineEl = document.getElementById('lib-outline') as HTMLDivElement | null
+    if (!container || !outlineEl) return
+
+    const treeEl = libraryEl?.querySelector('#lib-tree') as HTMLDivElement | null
+    const tabFiles = libraryEl?.querySelector('#lib-tab-files') as HTMLButtonElement | null
+    const tabOutline = libraryEl?.querySelector('#lib-tab-outline') as HTMLButtonElement | null
+
+    // 默认：嵌入库侧栏（与旧行为一致）
+    if (outlineLayout === 'embedded') {
+      if (libraryEl && outlineEl.parentElement !== libraryEl) {
+        libraryEl.appendChild(outlineEl)
       }
-      // 剥离：挂到容器下作为独立列
-      if (outlineEl.parentElement !== container) {
-        container.appendChild(outlineEl)
-      }
-      outlineEl.classList.add('outline-floating')
-      const isLeft = outlineLayout === 'left'
-      outlineEl.classList.toggle('side-left', isLeft)
-      outlineEl.classList.toggle('side-right', !isLeft)
-      container.classList.toggle('with-outline-left', isLeft)
-      container.classList.toggle('with-outline-right', !isLeft)
+      outlineEl.classList.remove('outline-floating', 'side-left', 'side-right')
+      container.classList.remove('with-outline-left', 'with-outline-right')
+
+      // 嵌入模式：按当前 Tab 决定显示目录/大纲，避免从剥离切回后两者同时可见
+      const showOutline = !!tabOutline?.classList.contains('active') && !tabFiles?.classList.contains('active')
+      if (treeEl) treeEl.classList.toggle('hidden', showOutline)
+      outlineEl.classList.toggle('hidden', !showOutline)
+
       notifyWorkspaceLayoutChanged()
-    } catch {}
-  }
+      return
+    }
+
+    // 剥离：挂到容器下作为独立列
+    if (outlineEl.parentElement !== container) {
+      container.appendChild(outlineEl)
+    }
+    outlineEl.classList.add('outline-floating')
+    const isLeft = outlineLayout === 'left'
+    outlineEl.classList.toggle('side-left', isLeft)
+    outlineEl.classList.toggle('side-right', !isLeft)
+
+    // 剥离模式：目录始终可见；大纲是否显示由“是否有内容”决定
+    if (treeEl) treeEl.classList.remove('hidden')
+    syncDetachedOutlineVisibility(outlineLayout, container, outlineEl)
+
+    notifyWorkspaceLayoutChanged()
+  } catch {}
+}
 
   // 布局变化通知：供插件/外部代码在库/大纲/Panel 变化时重新计算工作区
   function notifyWorkspaceLayoutChanged(): void {
@@ -5373,6 +5413,8 @@ async function persistLibraryVisible() {
   }
 
   const OUTLINE_LAYOUT_KEY = 'outlineLayout'
+  const OUTLINE_LAYOUT_LS_KEY = 'flymd:outlineLayout'
+  function isOutlineLayout(v: any): v is OutlineLayout { return v === 'embedded' || v === 'left' || v === 'right' }
 
   // 大纲布局：右键菜单 UI（挂在“大纲”标签上）
   function showOutlineLayoutMenu(x: number, y: number) {
@@ -5442,6 +5484,8 @@ async function persistLibraryVisible() {
 
   async function setOutlineLayout(mode: OutlineLayout, persist = true): Promise<void> {
     outlineLayout = mode
+    // 本地快速记忆：即使 Store 不可用也能恢复（并且关闭时导出便携配置更稳）
+    try { localStorage.setItem(OUTLINE_LAYOUT_LS_KEY, outlineLayout) } catch {}
     try {
       if (persist && store) {
         await store.set(OUTLINE_LAYOUT_KEY, outlineLayout)
@@ -5449,25 +5493,32 @@ async function persistLibraryVisible() {
       }
     } catch {}
     applyOutlineLayout()
-    // 剥离模式下，确保目录和大纲同时可见
-    try {
-      const library = document.getElementById('library') as HTMLDivElement | null
-      const treeEl = library?.querySelector('#lib-tree') as HTMLDivElement | null
-      const outlineEl = document.getElementById('lib-outline') as HTMLDivElement | null
-      if (outlineLayout !== 'embedded') {
-        if (treeEl) treeEl.classList.remove('hidden')
-        if (outlineEl) outlineEl.classList.remove('hidden')
-      }
-    } catch {}
+    // 剥离布局：切换后立刻刷新一次，保证“无大纲自动隐藏/有大纲自动出现”即时生效
+    try { if (outlineLayout !== 'embedded') renderOutlinePanel() } catch {}
   }
 
   async function getOutlineLayout(): Promise<OutlineLayout> {
+    let fromLs: OutlineLayout | null = null
     try {
-      if (!store) return outlineLayout
-      const v = await store.get(OUTLINE_LAYOUT_KEY)
-      if (v === 'embedded' || v === 'left' || v === 'right') return v
+      const v = localStorage.getItem(OUTLINE_LAYOUT_LS_KEY)
+      if (isOutlineLayout(v)) fromLs = v
     } catch {}
-    return outlineLayout
+
+    let fromStore: OutlineLayout | null = null
+    try {
+      if (store) {
+        const v = await store.get(OUTLINE_LAYOUT_KEY)
+        if (isOutlineLayout(v)) fromStore = v
+      }
+    } catch {}
+
+    // localStorage 写入是同步的，更接近“用户刚刚点的那一下”；优先用它，再把 Store 补齐
+    const picked = fromLs ?? fromStore ?? outlineLayout
+
+    try { if (picked !== fromLs) localStorage.setItem(OUTLINE_LAYOUT_LS_KEY, picked) } catch {}
+    try { if (store && picked !== fromStore) { await store.set(OUTLINE_LAYOUT_KEY, picked); await store.save() } } catch {}
+
+    return picked
   }
 
   async function setLibrarySide(side: LibrarySide, persist = true) {
@@ -8690,6 +8741,13 @@ function bindEvents() {
       try { portableActive = await isPortableModeEnabled() } catch {}
       const runPortableExportOnExit = async () => {
         if (portableActive) {
+          // 便携模式导出依赖 settings 文件：先把关键 UI 状态刷到 Store，避免导出旧配置
+          try {
+            if (store) {
+              await store.set(OUTLINE_LAYOUT_KEY, outlineLayout)
+              await store.save()
+            }
+          } catch {}
           try { await exportPortableBackupSilent() } catch (err) { console.warn('[Portable] 关闭时导出失败', err) }
         }
       }
@@ -8982,8 +9040,7 @@ function bindEvents() {
     } catch {}
     try {
       const layout = await getOutlineLayout()
-      outlineLayout = layout
-      applyOutlineLayout()
+      await setOutlineLayout(layout, false)
     } catch {}
     // 读取紧凑标题栏设置并应用
     try {

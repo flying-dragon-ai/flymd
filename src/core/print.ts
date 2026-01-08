@@ -143,6 +143,14 @@ function appendPrintCss(doc: Document, extraCss?: string): void {
       height: auto !important;
     }
 
+    /* KaTeX 关键样式：避免 build/打印环境下 SVG/根号等符号异常 */
+    .flymd-print-preview .katex { font-size: 1em; text-indent: 0; text-rendering: auto; }
+    .flymd-print-preview .katex svg { display: inline-block; position: relative; width: 100%; height: 100%; }
+    .flymd-print-preview .katex svg path { fill: currentColor; }
+    .flymd-print-preview .katex .hide-tail { overflow: hidden; }
+    .flymd-print-preview .md-math-inline .katex { display: inline-block; }
+    .flymd-print-preview .md-math-block .katex { display: block; text-align: center; }
+
     @page { margin: 10mm; }
 
     /* 断页保护：尽量别把块级元素切成两半 */
@@ -182,6 +190,24 @@ async function waitForFonts(doc: Document): Promise<void> {
   try {
     if (doc.fonts && doc.fonts.ready) await doc.fonts.ready
   } catch {}
+}
+
+async function waitForStylesheets(doc: Document, timeoutMs = 2000): Promise<void> {
+  const links = Array.from(doc.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"][href]'))
+  const pending = links.filter((l) => !l.sheet)
+  if (!pending.length) return
+  await Promise.race([
+    Promise.all(pending.map((l) => new Promise<void>((resolve) => {
+      const done = () => resolve()
+      try {
+        l.addEventListener('load', done, { once: true })
+        l.addEventListener('error', done, { once: true })
+      } catch {
+        resolve()
+      }
+    }))),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ])
 }
 
 async function waitForImages(doc: Document): Promise<void> {
@@ -224,6 +250,7 @@ export async function printElement(el: HTMLElement, opt?: PrintElementOptions): 
   root.appendChild(clone)
   doc.body.appendChild(root)
 
+  await waitForStylesheets(doc)
   await waitForFonts(doc)
   await waitForImages(doc)
 
@@ -232,4 +259,3 @@ export async function printElement(el: HTMLElement, opt?: PrintElementOptions): 
   try { win.focus() } catch {}
   win.print()
 }
-

@@ -72,6 +72,10 @@ export async function findWebviewWindowLabelAtScreenPoint(
 export async function createEditorWebviewWindow(
   opts?: EditorWindowCreateOpts,
 ): Promise<{ label: string } | null> {
+  const preferTransparent = (): boolean => {
+    const v = (globalThis as any).__flymdTransparentSupported
+    return typeof v === 'boolean' ? v : true
+  }
   try {
     const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
     const label =
@@ -88,7 +92,7 @@ export async function createEditorWebviewWindow(
       height,
       resizable: true,
       decorations: false,
-      transparent: true,
+      transparent: preferTransparent(),
       shadow: false,
       x: typeof opts?.x === 'number' ? opts!.x : undefined,
       y: typeof opts?.y === 'number' ? opts!.y : undefined,

@@ -96,7 +96,7 @@
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
-  #app {
+  body.transparent-window #app {
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25),
                 0 0 1px rgba(0, 0, 0, 0.3);
   }
@@ -133,12 +133,6 @@ body.light-mode {
 html, body { height: 100%; margin: 0; padding: 0; }
 html { background: transparent; }
 body {
-  background: transparent;
-  padding: 12px; /* 为窗口阴影留出空间 */
-  box-sizing: border-box;
-}
-#app {
-  height: 100%;
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-ui, inherit);
@@ -146,6 +140,11 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  padding: 0;
+}
+#app {
+  height: 100%;
+  background: var(--bg);
 }
 
 /* 通用隐藏类 */
@@ -153,17 +152,24 @@ body {
   display: none !important;
 }
 
+/* 透明窗口样式：启动后探测支持才启用（不支持则保持“之前状态”） */
+body.transparent-window {
+  background: transparent;
+  padding: 12px; /* 为窗口阴影留出空间 */
+  box-sizing: border-box;
+}
+body.transparent-window #app {
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08),
+              0 4px 16px rgba(0, 0, 0, 0.12),
+              0 2px 6px rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+}
+
 #app {
   display: flex;
   flex-direction: row; /* 水平布局：ribbon + main-content */
   overflow: hidden; /* 防止内容溢出影响布局 */
   animation: app-fadein 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-
-  /* 窗口阴影（替代原生 shadow: true） */
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08),
-              0 4px 16px rgba(0, 0, 0, 0.12),
-              0 2px 6px rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
 }
 
 /* Ribbon 左侧垂直图标菜单 - 现代精致风格 */
@@ -5689,7 +5695,7 @@ body.dark-mode {
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-body.dark-mode #app {
+body.dark-mode.transparent-window #app {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25),
               0 0 1px rgba(0, 0, 0, 0.3);
 }

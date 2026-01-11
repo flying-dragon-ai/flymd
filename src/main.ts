@@ -1287,6 +1287,8 @@ performance.mark('flymd-dom-ready')
 initPlatformIntegration().catch((e) => console.error('[Platform] Initialization failed:', e))
 // 初始化平台类（用于 CSS 平台适配，Windows 显示窗口控制按钮）
 try { initPlatformClass() } catch {}
+// 探测透明支持（mac/linux 不支持时自动回退到“之前状态”）
+initTransparentWindowMode().catch(() => {})
 // 应用已保存主题并挂载主题 UI
 try { applySavedTheme() } catch {}
 try { initThemeUI() } catch {}
@@ -5570,6 +5572,35 @@ function initPlatformClass() {
   }
 }
 
+let cachedTransparentSupport: boolean | null = null
+
+async function detectTransparentWindowSupport(): Promise<boolean> {
+  if (cachedTransparentSupport !== null) return cachedTransparentSupport
+  const platform = (navigator.platform || '').toLowerCase()
+  const isWindows = platform.includes('win')
+  if (isWindows) {
+    cachedTransparentSupport = true
+  } else {
+    try {
+      cachedTransparentSupport = await invoke<boolean>('supports_transparent_window')
+    } catch {
+      cachedTransparentSupport = false
+    }
+  }
+  ;(window as any).__flymdTransparentSupported = cachedTransparentSupport
+  return cachedTransparentSupport
+}
+
+// 启动后探测透明支持：支持则启用透明窗口样式；不支持则保持“之前状态”（无 padding/无圆角阴影）。
+async function initTransparentWindowMode(): Promise<void> {
+  // 先乐观启用：避免 Windows 因为探测失败/后端未就绪直接退回“旧状态”
+  try { document.body.classList.add('transparent-window') } catch {}
+  const supported = await detectTransparentWindowSupport()
+  try {
+    document.body.classList.toggle('transparent-window', supported)
+  } catch {}
+}
+
 // 窗口拖拽初始化：为 mac / Linux 上的紧凑标题栏补齐拖动支持
 function initWindowDrag() {
   const platform = (navigator.platform || '').toLowerCase()
@@ -8911,15 +8942,6 @@ function bindEvents() {
   try {
     console.log('flyMD (飞速MarkDown) 应用启动...')
     try { logInfo('打点:JS启动') } catch {}
-
-    // Linux 平台：设置不透明背景，修复 WebKitGTK/AppImage 透明窗口问题
-    if (navigator.platform.toLowerCase().includes('linux')) {
-      try {
-        await getCurrentWindow().setBackgroundColor('#ffffff')
-      } catch {
-        document.body.style.background = '#ffffff'
-      }
-    }
 
     // 尝试初始化存储（确保完成后再加载扩展，避免读取不到已安装列表）
     await initStore()

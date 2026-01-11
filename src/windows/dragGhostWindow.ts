@@ -46,6 +46,13 @@ function stableLabel(ownerLabel: string): string {
 }
 
 export async function createDragGhostWindow(text: string): Promise<DragGhostWindow | null> {
+  const transparentSupported = (): boolean => {
+    const v = (globalThis as any).__flymdTransparentSupported
+    return typeof v === 'boolean' ? v : true
+  }
+  // 透明窗口不支持时直接降级：避免出现遮挡鼠标的“黑块窗口”
+  if (!transparentSupported()) return null
+
   try {
     const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
     const { LogicalPosition } = await import('@tauri-apps/api/window')

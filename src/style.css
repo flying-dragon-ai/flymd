@@ -2015,8 +2015,8 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 /* 通知容器：支持多消息堆叠 */
 .notification-container {
   position: fixed;
-  right: 14px;
-  bottom: 10px;
+  right: 26px;  /* 14 + 12px body padding */
+  bottom: 22px; /* 10 + 12px body padding */
   z-index: 999999; /* 最高层级，确保不被任何弹窗遮挡 */
   display: flex;
   flex-direction: column-reverse; /* 新消息从下往上堆叠 */
@@ -2034,9 +2034,6 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   border-radius: var(--radius-sm);
   background: var(--bg);
   max-width: 400px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2051,6 +2048,37 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .notification-item .notification-text {
   flex: 1;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 通知动作按钮 */
+.notification-item .notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.notification-item .notification-action-btn {
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(127,127,127,0.06);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.notification-item .notification-action-btn:hover {
+  background: rgba(127,127,127,0.12);
+}
+
+.notification-item .notification-action-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* 可点击的通知 */

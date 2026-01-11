@@ -6,7 +6,7 @@ import { createCustomTitleBar, removeCustomTitleBar, applyWindowDecorationsCore 
 
 // 内部状态：专注模式与紧凑标题栏开关
 let focusMode = false
-let compactTitlebar = false
+let compactTitlebar = true // 强制开启：CSS 圆角阴影要求必须使用紧凑标题栏
 
 // 对外同步当前专注模式状态（供主模块判断）
 export function isFocusModeEnabled(): boolean {
@@ -23,7 +23,8 @@ export function isCompactTitlebarEnabled(): boolean {
 }
 
 export function setCompactTitlebarFlag(enabled: boolean): void {
-  compactTitlebar = !!enabled
+  // 强制开启，忽略传入参数
+  compactTitlebar = true
 }
 
 // 专注模式切换：负责 body 类、自定义标题栏与窗口装饰
@@ -71,40 +72,27 @@ export async function getFocusMode(store: Store | null): Promise<boolean> {
   }
 }
 
-// 从 Store 读取紧凑标题栏状态
+// 从 Store 读取紧凑标题栏状态（强制开启：CSS 圆角阴影要求）
 export async function getCompactTitlebar(store: Store | null): Promise<boolean> {
-  try {
-    if (!store) return compactTitlebar
-    const v = await store.get('compactTitlebar')
-    if (typeof v === 'boolean') {
-      compactTitlebar = v
-      return v
-    }
-    return compactTitlebar
-  } catch {
-    return compactTitlebar
-  }
+  // 强制返回 true，忽略存储值
+  compactTitlebar = true
+  return true
 }
 
-// 设置紧凑标题栏状态并按需持久化到 Store，同时更新窗口装饰
+// 设置紧凑标题栏状态（强制开启：CSS 圆角阴影要求）
 export async function setCompactTitlebar(
   enabled: boolean,
   store: Store | null,
   persist = true,
 ): Promise<void> {
-  compactTitlebar = !!enabled
+  // 强制开启，忽略传入参数
+  compactTitlebar = true
 
   try {
-    document.body.classList.toggle('compact-titlebar', compactTitlebar)
+    document.body.classList.add('compact-titlebar')
   } catch {}
 
-  if (persist && store) {
-    try {
-      await store.set('compactTitlebar', compactTitlebar)
-      await store.save()
-    } catch {}
-  }
-
+  // 不再持久化，始终为 true
   try {
     await applyWindowDecorationsCore(getCurrentWindow, focusMode, compactTitlebar)
   } catch {}

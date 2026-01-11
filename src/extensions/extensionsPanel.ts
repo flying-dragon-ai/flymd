@@ -27,8 +27,8 @@ export interface ExtensionsPanelHost {
   openWebdavSyncDialog(): void | Promise<void>
   getWebdavSyncConfig(): Promise<{ enabled: boolean }>
   openInBrowser(url: string): void | Promise<void>
-  installPluginFromGit(ref: string, opt?: { enabled?: boolean }): Promise<InstalledPlugin>
-  installPluginFromLocal(path: string, opt?: { enabled?: boolean }): Promise<InstalledPlugin>
+  installPluginFromGit(ref: string, opt?: { enabled?: boolean; showInMenuBar?: boolean }): Promise<InstalledPlugin>
+  installPluginFromLocal(path: string, opt?: { enabled?: boolean; showInMenuBar?: boolean }): Promise<InstalledPlugin>
   activatePlugin(p: InstalledPlugin): Promise<void>
   deactivatePlugin(id: string): Promise<void>
   getActivePluginModule(id: string): any
@@ -401,9 +401,14 @@ function getPluginOrder(id: string, name?: string, bias = 0): number {
 async function updateInstalledPlugin(p: InstalledPlugin, info: PluginUpdateState): Promise<InstalledPlugin> {
   if (!host) throw new Error('ExtensionsPanelHost 未初始化')
   const enabled = !!p.enabled
+  const showInMenuBar =
+    typeof p.showInMenuBar === 'boolean' ? p.showInMenuBar : true
   try { await host.deactivatePlugin(p.id) } catch {}
   try { await host.removePluginDir(p.dir) } catch {}
-  const rec = await host.installPluginFromGit(info.manifestUrl, { enabled })
+  const rec = await host.installPluginFromGit(info.manifestUrl, {
+    enabled,
+    showInMenuBar,
+  })
   try {
     if (enabled) await host.activatePlugin(rec)
   } catch {}

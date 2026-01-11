@@ -111,6 +111,13 @@ export type NotificationType =
   | 'mode-wysiwyg'
   | 'mode-split'
 
+export type NotificationAction = {
+  label: string
+  title?: string
+  closeOnClick?: boolean
+  onClick: () => void | Promise<void>
+}
+
 interface NotificationConfig {
   icon: string
   bgColor: string
@@ -206,6 +213,100 @@ export class NotificationManager {
 
     this.container = el
     return el
+  }
+
+  static showWithActions(
+    type: NotificationType,
+    message: string,
+    opt?: {
+      duration?: number
+      onClick?: () => void
+      actions?: NotificationAction[]
+    },
+  ): string {
+    try {
+      const container = this.ensureContainer()
+      const config = this.configs[type]
+      const id = `notification-${++this.idCounter}`
+
+      const item = document.createElement('div')
+      const clickable = !!opt?.onClick || !!config.clickable
+      item.className = 'notification-item' + (clickable ? ' clickable' : '')
+      item.style.backgroundColor = config.bgColor
+
+      const iconEl = document.createElement('span')
+      iconEl.className = 'notification-icon'
+      iconEl.textContent = config.icon
+
+      const textEl = document.createElement('span')
+      textEl.className = 'notification-text'
+      textEl.textContent = message
+
+      item.appendChild(iconEl)
+      item.appendChild(textEl)
+
+      const actions = Array.isArray(opt?.actions) ? opt!.actions! : []
+      if (actions.length > 0) {
+        const actionsEl = document.createElement('div')
+        actionsEl.className = 'notification-actions'
+        for (const a of actions) {
+          if (!a || !a.label || typeof a.onClick !== 'function') continue
+          const btn = document.createElement('button')
+          btn.type = 'button'
+          btn.className = 'notification-action-btn'
+          btn.textContent = a.label
+          if (a.title) btn.title = a.title
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation()
+            try {
+              void Promise.resolve(a.onClick()).catch((err) => {
+                console.error('[Notification] action 执行失败', err)
+              })
+            } catch (err) {
+              console.error('[Notification] action 执行失败', err)
+            }
+            if (a.closeOnClick !== false) this.hide(id)
+          })
+          actionsEl.appendChild(btn)
+        }
+        item.appendChild(actionsEl)
+      }
+
+      if (opt?.onClick) {
+        item.addEventListener('click', () => {
+          try {
+            opt.onClick!()
+          } finally {
+            this.hide(id)
+          }
+        })
+      }
+
+      container.appendChild(item)
+
+      const finalDuration =
+        opt && typeof opt.duration === 'number' ? opt.duration : config.duration
+      const timer =
+        finalDuration > 0
+          ? window.setTimeout(() => {
+              this.hide(id)
+            }, finalDuration)
+          : null
+
+      this.notifications.set(id, {
+        id,
+        type,
+        message,
+        element: item,
+        timer,
+        onClick: opt?.onClick,
+      })
+
+      return id
+    } catch (e) {
+      console.error('[Notification] 显示通知失败', e)
+      return ''
+    }
   }
 
   static show(type: NotificationType, message: string, duration?: number, onClick?: () => void): string {

@@ -78,11 +78,11 @@ export type PluginRuntimeHandles = {
 
   installPluginFromGit: (
     inputRaw: string,
-    opt?: { enabled?: boolean },
+    opt?: { enabled?: boolean; showInMenuBar?: boolean },
   ) => Promise<InstalledPlugin>
   installPluginFromLocal: (
     sourcePath: string,
-    opt?: { enabled?: boolean },
+    opt?: { enabled?: boolean; showInMenuBar?: boolean },
   ) => Promise<InstalledPlugin>
 
   activatePlugin: (p: InstalledPlugin) => Promise<void>
@@ -237,7 +237,7 @@ export function initPluginRuntime(
 
   async function installPluginFromGit(
     inputRaw: string,
-    opt?: { enabled?: boolean },
+    opt?: { enabled?: boolean; showInMenuBar?: boolean },
   ): Promise<InstalledPlugin> {
     const { installPluginFromGitCore } = await import('./runtime')
     const store = deps.getStore()
@@ -249,7 +249,7 @@ export function initPluginRuntime(
 
   async function installPluginFromLocal(
     sourcePath: string,
-    opt?: { enabled?: boolean },
+    opt?: { enabled?: boolean; showInMenuBar?: boolean },
   ): Promise<InstalledPlugin> {
     const { installPluginFromLocalCore } = await import('./runtime')
     const store = deps.getStore()
@@ -321,12 +321,68 @@ export function initPluginRuntime(
       }
 
       try {
-        // 使用新的通知系统显示扩展更新通知（5秒后自动消失）
-        NotificationManager.show(
-          'extension' as NotificationType,
-          msg,
-          5000,
-        )
+        let updating = false
+
+        const toUpdate: Array<{ p: InstalledPlugin; info: PluginUpdateState }> =
+          []
+        for (const id of ids) {
+          const p = installedMap[id]
+          const info = updateMap[id]
+          if (!p || !info) continue
+          toUpdate.push({ p, info })
+        }
+
+        const runUpdate = async () => {
+          if (updating) return
+          if (!toUpdate.length) return
+          updating = true
+
+          const progressId = NotificationManager.show(
+            'extension' as NotificationType,
+            t('ext.update.btn') + '...',
+            0,
+          )
+
+          try {
+            let done = 0
+            for (const it of toUpdate) {
+              done++
+              NotificationManager.updateMessage(
+                progressId,
+                `${t('ext.update.btn')}... (${done}/${toUpdate.length})`,
+              )
+              const rec = await updateInstalledPlugin(it.p, it.info)
+              installedMap[rec.id] = rec
+            }
+            NotificationManager.hide(progressId)
+            NotificationManager.show(
+              'plugin-success' as NotificationType,
+              t('ext.update.ok'),
+              2000,
+            )
+          } catch (e) {
+            NotificationManager.hide(progressId)
+            const errMsg = e instanceof Error ? e.message : String(e)
+            NotificationManager.show(
+              'plugin-error' as NotificationType,
+              t('ext.update.fail') + (errMsg ? ': ' + errMsg : ''),
+              4000,
+            )
+          } finally {
+            updating = false
+          }
+        }
+
+        // 使用新的通知系统显示扩展更新通知，并提供“立即更新”按钮
+        NotificationManager.showWithActions('extension' as NotificationType, msg, {
+          duration: 8000,
+          actions: [
+            {
+              label: t('ext.update.now'),
+              onClick: runUpdate,
+            },
+          ],
+        })
       } catch {}
     } catch (e) {
       console.warn('[Extensions] 启动扩展更新检查失败', e)
@@ -414,13 +470,18 @@ export function initPluginRuntime(
     info: PluginUpdateState,
   ): Promise<InstalledPlugin> {
     const enabled = !!p.enabled
+    const showInMenuBar =
+      typeof p.showInMenuBar === 'boolean' ? p.showInMenuBar : true
     try {
       await deactivatePlugin(p.id)
     } catch {}
     try {
       await removePluginDir(p.dir)
     } catch {}
-    const rec = await installPluginFromGit(info.manifestUrl, { enabled })
+    const rec = await installPluginFromGit(info.manifestUrl, {
+      enabled,
+      showInMenuBar,
+    })
     try {
       if (enabled) await activatePlugin(rec)
     } catch {}

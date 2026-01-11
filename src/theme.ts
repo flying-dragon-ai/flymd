@@ -570,10 +570,11 @@ function createPanel(): HTMLDivElement {
             <span class="theme-toggle-slider"></span>
           </div>
         </label>
-        <label class="theme-toggle-label theme-toggle-third theme-toggle-boxed" for="compact-titlebar-toggle">
+        <!-- 紧凑标题栏开关已隐藏：CSS 圆角阴影要求必须开启 -->
+        <label class="theme-toggle-label theme-toggle-third theme-toggle-boxed" for="compact-titlebar-toggle" style="display: none;">
           <span class="theme-toggle-text">${t('theme.compactTitlebar')}</span>
           <div class="theme-toggle-switch">
-            <input type="checkbox" id="compact-titlebar-toggle" class="theme-toggle-input" />
+            <input type="checkbox" id="compact-titlebar-toggle" class="theme-toggle-input" checked disabled />
             <span class="theme-toggle-slider"></span>
           </div>
         </label>

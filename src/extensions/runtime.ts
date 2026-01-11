@@ -40,6 +40,11 @@ export type InstalledPlugin = {
   manifestUrl?: string
 }
 
+export type InstallPluginOptions = {
+  enabled?: boolean
+  showInMenuBar?: boolean
+}
+
 export type PluginUpdateState = {
   manifestUrl: string
   remoteVersion: string
@@ -312,7 +317,7 @@ export async function getPluginUpdateStates(
 // 从远程 Git 仓库 / URL 安装扩展（不处理 UI，仅做 IO 与状态更新）
 export async function installPluginFromGitCore(
   inputRaw: string,
-  opt: { enabled?: boolean } | undefined,
+  opt: InstallPluginOptions | undefined,
   ctx: {
     appVersion: string
     store: Store | null
@@ -402,6 +407,8 @@ export async function installPluginFromGitCore(
 
   const enabled =
     opt && typeof opt.enabled === 'boolean' ? opt.enabled : true
+  const showInMenuBar =
+    opt && typeof opt.showInMenuBar === 'boolean' ? opt.showInMenuBar : false
 
   const record: InstalledPlugin = {
     id: manifest.id,
@@ -409,7 +416,7 @@ export async function installPluginFromGitCore(
     version: manifest.version,
     author: manifest.author,
     enabled,
-    showInMenuBar: false, // 新安装的插件默认收纳到"插件"菜单
+    showInMenuBar, // 新安装默认收纳到"插件"菜单，更新时由上层传入保持用户配置
     dir,
     main: mainRel,
     description: manifest.description,
@@ -425,7 +432,7 @@ export async function installPluginFromGitCore(
 // 从本地文件夹安装扩展（源目录在外部文件系统，目标写入 AppLocalData）
 export async function installPluginFromLocalCore(
   sourcePath: string,
-  opt: { enabled?: boolean } | undefined,
+  opt: InstallPluginOptions | undefined,
   ctx: {
     appVersion: string
     store: Store | null
@@ -501,6 +508,8 @@ export async function installPluginFromLocalCore(
   const mainRel = (manifest.main || 'main.js').replace(/^\/+/, '')
   const enabled =
     opt && typeof opt.enabled === 'boolean' ? opt.enabled : true
+  const showInMenuBar =
+    opt && typeof opt.showInMenuBar === 'boolean' ? opt.showInMenuBar : false
 
   const record: InstalledPlugin = {
     id: manifest.id,
@@ -508,7 +517,7 @@ export async function installPluginFromLocalCore(
     version: manifest.version,
     author: manifest.author,
     enabled,
-    showInMenuBar: false,
+    showInMenuBar,
     dir,
     main: mainRel,
     description: manifest.description,

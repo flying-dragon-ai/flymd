@@ -3526,44 +3526,15 @@ export function activate(context) {
   try {
     if (context && typeof context.addMenuItem === 'function') {
       context.addMenuItem({
-        label: ragText('知识库检索', 'Knowledge search'),
-        title: ragText('flymd-RAG：语义检索（需要先构建索引）', 'flymd-RAG: semantic search (requires index)'),
+        label: ragText('知识库设置', 'Knowledge base settings'),
+        title: ragText('flymd-RAG：打开知识库索引设置', 'flymd-RAG: open knowledge index settings'),
         onClick: async () => {
           try {
-            const cfg = await loadConfig(context)
-            if (!cfg.enabled) {
-              uiNotice(
-                context,
-                ragText('知识库索引未启用，请先在设置中开启', 'Knowledge index is disabled; please enable it in settings first'),
-                'err',
-                2000,
-              )
-              return
-            }
-            const q =
-              prompt(
-                ragText('输入检索内容（flymd-RAG）', 'Enter query for flymd-RAG search'),
-              ) || ''
-            if (!String(q).trim()) return
-            const hits = await searchIndex(context, q, { topK: 5 })
-            if (!hits.length) {
-              uiNotice(context, ragText('无结果', 'No result'), 'err', 1600)
-              return
-            }
-            const top = hits[0]
-            uiNotice(
-              context,
-              `Top1：${top.relative}:${top.startLine}-${top.endLine}（${top.score.toFixed(4)}）`,
-              'ok',
-              2400,
-            )
-            if (top.filePath && typeof context.openFileByPath === 'function') {
-              await context.openFileByPath(top.filePath)
-            }
+            await openSettingsDialog(context)
           } catch (e) {
             uiNotice(
               context,
-              e && e.message ? e.message : ragText('检索失败', 'Search failed'),
+              e && e.message ? e.message : ragText('打开设置失败', 'Failed to open settings'),
               'err',
               2400,
             )

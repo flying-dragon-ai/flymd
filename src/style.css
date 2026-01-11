@@ -96,6 +96,10 @@
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
   }
+  #app {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25),
+                0 0 1px rgba(0, 0, 0, 0.3);
+  }
 }
 
 /* 强制浅色模式：覆盖系统深色偏好（当用户在系统深色模式下选择浅色主题时） */
@@ -126,12 +130,15 @@ body.light-mode {
   --c-com: #9ca3af;
 }
 
-html, body, #app { height: 100%; }
-html, body {
-  margin: 0;
-  padding: 0;
-}
+html, body { height: 100%; margin: 0; padding: 0; }
+html { background: transparent; }
 body {
+  background: transparent;
+  padding: 12px; /* 为窗口阴影留出空间 */
+  box-sizing: border-box;
+}
+#app {
+  height: 100%;
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font-ui, inherit);
@@ -151,6 +158,12 @@ body {
   flex-direction: row; /* 水平布局：ribbon + main-content */
   overflow: hidden; /* 防止内容溢出影响布局 */
   animation: app-fadein 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 窗口阴影（替代原生 shadow: true） */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08),
+              0 4px 16px rgba(0, 0, 0, 0.12),
+              0 2px 6px rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
 }
 
 /* Ribbon 左侧垂直图标菜单 - 现代精致风格 */
@@ -5646,6 +5659,11 @@ body.dark-mode {
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+body.dark-mode #app {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25),
+              0 0 1px rgba(0, 0, 0, 0.3);
 }
 
 /* 夜间模式 - 标题栏和菜单 */

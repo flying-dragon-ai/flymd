@@ -2,6 +2,12 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.1.2
+- Added: Built-in image host: ImgLa uploader
+- Improved: Image upload flow and config storage (manual upload / S3 / ImgLa)
+- Improved: Outline auto hide/expand; refined outline layout copy and icons, plus a menu title hint
+- Improved: Built-in “Image Gallery” plugin: preview support; works with built-in image hosts (including ImgLa)
+
 ## Update v1.1.1
 - Improved: Tuned Windows rounded corners/shadows/transparent padding for clearer borders
 - Improved: Updated window control buttons to Win10/11-style SVG icons, with clearer maximize/restore state switching

@@ -2,6 +2,12 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.1.4
+- Added: Shortcut `Ctrl+Shift+Z` to toggle the Library sidebar
+- Improved: About dialog now includes a clearer keyboard shortcuts list
+- Improved: Smaller Library sidebar trigger hotspot in split view to reduce accidental activation
+- Changed: Updated icons for menu, extension marketplace, and language selector
+
 ## Update v1.1.3
 - Added: Lsky (Lsky Pro+) image host support (ImgLa compatible, configurable base URL)
 - Fixed: HTML sanitization on paste could break code formatting

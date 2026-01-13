@@ -1252,13 +1252,13 @@ app.innerHTML = `
       <button class="ribbon-btn" id="btn-filetree" title="${t('lib.toggle')}">${ribbonIcons.folder}</button>
       <button class="ribbon-btn" id="btn-open" title="${t('menu.file')}">${ribbonIcons.fileText}</button>
       <button class="ribbon-btn" id="btn-mode" title="${t('menu.mode')}">${ribbonIcons.layout}</button>
-      <button class="ribbon-btn" id="btn-plugins" title="${t('menu.plugins')}">${ribbonIcons.box}</button>
+      <button class="ribbon-btn" id="btn-plugins" title="${t('menu.plugins')}">${ribbonIcons.menu}</button>
       <button class="ribbon-btn" id="btn-update" title="${t('menu.update')}">${ribbonIcons.refreshCw}</button>
       <button class="ribbon-btn" id="btn-about" title="${t('menu.about')}">${ribbonIcons.info}</button>
     </div>
     <div class="ribbon-bottom">
       <button class="ribbon-btn" id="btn-theme" title="${t('menu.theme.tooltip')}">${ribbonIcons.settings}</button>
-      <button class="ribbon-btn" id="btn-extensions" title="${t('menu.extensions')}">${ribbonIcons.package}</button>
+      <button class="ribbon-btn" id="btn-extensions" title="${t('menu.extensions')}">${ribbonIcons.grid}</button>
       <button class="ribbon-btn" id="btn-lang" title="${t('menu.language')}">${ribbonIcons.globe}</button>
     </div>
   </aside>

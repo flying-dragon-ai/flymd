@@ -26,6 +26,27 @@ function tmText(zh, en) {
 
 const LS_KEY = 'flymd:typecho-manager:settings'
 
+// 设备检测：复用 s3-gallery 的成熟模式
+function tmIsMobile() {
+  return window.innerWidth <= 600  // 与现有 @media 断点一致
+}
+
+function tmGetDeviceType() {
+  const width = window.innerWidth
+  if (width <= 600) return 'mobile'
+  if (width <= 768) return 'tablet'
+  return 'desktop'
+}
+
+// z-index 层级规范
+const TM_Z_INDEX = {
+  OVERLAY: 90000,        // 主对话框遮罩
+  DIALOG: 90001,         // 主对话框内容
+  SUB_OVERLAY: 90010,    // 子对话框遮罩
+  SUB_DIALOG: 90011,     // 子对话框内容
+  CONTEXT_MENU: 90020,   // 右键菜单（最高层）
+}
+
 function createDefaultSettings() {
   return {
     endpoint: '',
@@ -309,13 +330,23 @@ let headSelectAllCheckbox = null
 let rollbackOverlayEl = null
 let rowContextMenuEl = null
 
+// 移动端过滤器折叠状态
+let filtersCollapsed = true // 默认折叠
+const LS_FILTERS_COLLAPSED_KEY = 'flymd:typecho-manager:filtersCollapsed'
+
+// 初始化时从 localStorage 读取
+try {
+  const stored = localStorage.getItem(LS_FILTERS_COLLAPSED_KEY)
+  if (stored === 'false') filtersCollapsed = false
+} catch {}
+
 // 设置窗口 DOM 引用
 let settingsOverlayEl = null
 
 function ensureStyle() {
   if (document.getElementById('tm-typecho-style')) return
   const css = [
-    '.tm-typecho-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:90000;}',
+    '.tm-typecho-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:' + TM_Z_INDEX.OVERLAY + ';}',
     '.tm-typecho-overlay.hidden{display:none;}',
     '.tm-typecho-dialog{width:1040px;max-width:calc(100% - 40px);max-height:80vh;background:var(--bg);color:var(--fg);border-radius:10px;border:1px solid var(--border);box-shadow:0 14px 36px rgba(0,0,0,.35);display:flex;flex-direction:column;font-size:13px;overflow:hidden;}',
     '.tm-typecho-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600;}',
@@ -326,6 +357,8 @@ function ensureStyle() {
     '.tm-typecho-btn.primary{border-color:#2563eb;background:#2563eb;color:#fff;}',
     '.tm-typecho-btn:hover{background:rgba(127,127,127,.16);}',
     '.tm-typecho-btn.primary:hover{background:#1d4ed8;border-color:#1d4ed8;}',
+    '.tm-typecho-btn:active{opacity:0.7;transform:scale(0.98);}',
+    '.tm-typecho-btn:focus-visible{outline:2px solid #2563eb;outline-offset:2px;}',
     '.tm-typecho-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:8px 14px 10px 14px;}',
     '.tm-typecho-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}',
     '.tm-typecho-filter-group{display:flex;align-items:center;gap:4px;}',
@@ -334,6 +367,7 @@ function ensureStyle() {
     '.tm-typecho-radio label{display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;}',
     '.tm-typecho-radio input{margin:0;}',
     '.tm-typecho-input,.tm-typecho-select{border-radius:999px;border:1px solid var(--border);background:var(--bg);color:var(--fg);padding:3px 9px;font-size:12px;}',
+    '.tm-typecho-input:focus,.tm-typecho-select:focus{outline:2px solid #2563eb;outline-offset:2px;}',
     '.tm-typecho-input-date{max-width:140px;}',
     '.tm-typecho-main{flex:1;min-height:0;margin-top:4px;border-radius:8px;border:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;background:rgba(127,127,127,.02);}',
     '.tm-typecho-table-head{display:grid;grid-template-columns:2.5fr 1.4fr 1.2fr 0.9fr 1.2fr;border-bottom:1px solid var(--border);background:rgba(127,127,127,.06);}',
@@ -354,7 +388,7 @@ function ensureStyle() {
     '.tm-typecho-footer-right{display:flex;align-items:center;gap:6px;}',
     '.tm-typecho-page-info{font-size:11px;color:var(--muted);}',
     '.tm-typecho-empty{padding:16px 12px;font-size:12px;color:var(--muted);}',
-    '.tm-typecho-settings-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:90010;}',
+    '.tm-typecho-settings-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:' + TM_Z_INDEX.SUB_OVERLAY + ';}',
     '.tm-typecho-settings-overlay.hidden{display:none;}',
     '.tm-typecho-settings-dialog{width:480px;max-width:calc(100% - 40px);max-height:80vh;background:var(--bg);color:var(--fg);border-radius:10px;border:1px solid var(--border);box-shadow:0 14px 36px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden;font-size:13px;}',
     '.tm-typecho-settings-header{padding:9px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:14px;}',
@@ -363,7 +397,7 @@ function ensureStyle() {
     '.tm-typecho-settings-label{font-size:12px;color:var(--muted);}',
     '.tm-typecho-settings-input{border-radius:7px;border:1px solid var(--border);background:var(--bg);color:var(--fg);padding:5px 8px;font-size:12px;}',
     '.tm-typecho-settings-footer{padding:8px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;}',
-    '.tm-typecho-row-menu{position:fixed;z-index:90020;min-width:150px;background:var(--bg);color:var(--fg);border-radius:8px;border:1px solid var(--border);box-shadow:0 14px 36px rgba(0,0,0,.35);font-size:12px;padding:4px 0;}',
+    '.tm-typecho-row-menu{position:fixed;z-index:' + TM_Z_INDEX.CONTEXT_MENU + ';min-width:150px;background:var(--bg);color:var(--fg);border-radius:8px;border:1px solid var(--border);box-shadow:0 14px 36px rgba(0,0,0,.35);font-size:12px;padding:4px 0;}',
     '.tm-typecho-row-menu-item{padding:6px 12px;cursor:pointer;white-space:nowrap;}',
     '.tm-typecho-row-menu-item:hover{background:rgba(127,127,127,.10);}',
     '.tm-typecho-row-menu-sep{margin:4px 0;border-top:1px solid var(--border);}',
@@ -388,7 +422,14 @@ function ensureStyle() {
     '  .tm-typecho-footer{flex-direction:column;gap:10px;align-items:stretch;}',
     '  .tm-typecho-footer-left,.tm-typecho-footer-right{width:100%;}',
     '  .tm-typecho-footer-right{justify-content:space-between;}',
+    '  .tm-typecho-footer-right button{min-height:44px;padding:8px 16px;}',
     '  .tm-typecho-settings-dialog,.tm-typecho-related-dialog,.tm-typecho-stats-dialog,.tm-typecho-rollback-dialog{width:100vw;height:auto;max-height:90vh;border-radius:0;}',
+    '  .tm-filters-toggle{background:rgba(37,99,235,.06);border-color:#2563eb;color:#2563eb;font-weight:600;}',
+    '  .tm-filters-toggle:active{background:rgba(37,99,235,.12);}',
+    '  .tm-typecho-row:active{background:rgba(37,99,235,.10) !important;}',
+    '  .tm-typecho-btn{-webkit-tap-highlight-color:rgba(0,0,0,0);}',
+    '  .tm-typecho-header-right button{-webkit-tap-highlight-color:transparent;}',
+    '  input,select,textarea,button{-webkit-text-size-adjust:100%;text-size-adjust:100%;}',
     '}'
   ].join('\n')
   const style = document.createElement('style')
@@ -587,6 +628,27 @@ function buildManagerDialog() {
   searchGroup.appendChild(searchInput)
   filters.appendChild(searchGroup)
 
+  // 移动端：添加过滤器折叠按钮
+  if (tmIsMobile()) {
+    const toggleBtn = document.createElement('button')
+    toggleBtn.id = 'tm-filters-toggle-btn'
+    toggleBtn.className = 'tm-typecho-btn tm-filters-toggle'
+    toggleBtn.style.width = '100%'
+    toggleBtn.style.minHeight = '44px'
+    toggleBtn.style.marginBottom = '8px'
+    toggleBtn.style.justifyContent = 'center'
+    toggleBtn.textContent = filtersCollapsed
+      ? ('▼ ' + tmText('展开筛选', 'Expand filters'))
+      : ('▲ ' + tmText('收起筛选', 'Collapse filters'))
+    toggleBtn.addEventListener('click', toggleFiltersOnMobile)
+    body.appendChild(toggleBtn)
+  }
+
+  // 移动端：根据折叠状态设置初始显示
+  if (tmIsMobile() && filtersCollapsed) {
+    filters.style.display = 'none'
+  }
+
   body.appendChild(filters)
 
   // 列表
@@ -742,8 +804,13 @@ function buildManagerDialog() {
   btnBatchDownload.addEventListener('click', () => { void batchDownloadSelected(globalContextRef) })
 
   prevPageBtn = document.createElement('button')
-  prevPageBtn.className = 'tm-typecho-btn'
+  prevPageBtn.className = 'tm-typecho-btn tm-typecho-btn-page'
   prevPageBtn.textContent = tmText('上一页', 'Prev page')
+  if (tmIsMobile()) {
+    prevPageBtn.style.minHeight = '44px'
+    prevPageBtn.style.padding = '10px 16px'
+    prevPageBtn.style.fontSize = '14px'
+  }
   prevPageBtn.addEventListener('click', () => {
     if (sessionState.pageIndex > 0) {
       sessionState.pageIndex--
@@ -752,8 +819,13 @@ function buildManagerDialog() {
   })
 
   nextPageBtn = document.createElement('button')
-  nextPageBtn.className = 'tm-typecho-btn'
+  nextPageBtn.className = 'tm-typecho-btn tm-typecho-btn-page'
   nextPageBtn.textContent = tmText('下一页', 'Next page')
+  if (tmIsMobile()) {
+    nextPageBtn.style.minHeight = '44px'
+    nextPageBtn.style.padding = '10px 16px'
+    nextPageBtn.style.fontSize = '14px'
+  }
   nextPageBtn.addEventListener('click', () => {
     sessionState.pageIndex++
     void renderPostTable()
@@ -873,6 +945,34 @@ function closeRowContextMenu() {
   }
 }
 
+function toggleFiltersOnMobile() {
+  if (!tmIsMobile()) return
+  filtersCollapsed = !filtersCollapsed
+
+  try {
+    localStorage.setItem(LS_FILTERS_COLLAPSED_KEY, String(filtersCollapsed))
+  } catch {}
+
+  updateFiltersPanelVisibility()
+}
+
+function updateFiltersPanelVisibility() {
+  if (!tmIsMobile()) return
+
+  const filtersEl = document.querySelector('.tm-typecho-filters')
+  const toggleBtn = document.getElementById('tm-filters-toggle-btn')
+
+  if (!filtersEl || !toggleBtn) return
+
+  if (filtersCollapsed) {
+    filtersEl.style.display = 'none'
+    toggleBtn.textContent = '▼ ' + tmText('展开筛选', 'Expand filters')
+  } else {
+    filtersEl.style.display = 'flex'
+    toggleBtn.textContent = '▲ ' + tmText('收起筛选', 'Collapse filters')
+  }
+}
+
 async function openRowContextMenu(context, post, x, y) {
   if (!context || !post) return
   ensureStyle()
@@ -880,8 +980,11 @@ async function openRowContextMenu(context, post, x, y) {
 
   const menu = document.createElement('div')
   menu.className = 'tm-typecho-row-menu'
-  menu.style.left = Math.max(0, x - 4) + 'px'
-  menu.style.top = Math.max(0, y - 4) + 'px'
+
+  // 暂时设置在 (0,0) 以获取真实尺寸
+  menu.style.left = '0px'
+  menu.style.top = '0px'
+  menu.style.visibility = 'hidden'
 
   const addItem = (label, fn) => {
     const item = document.createElement('div')
@@ -904,6 +1007,33 @@ async function openRowContextMenu(context, post, x, y) {
   document.body.appendChild(menu)
   rowContextMenuEl = menu
 
+  // 智能边界检测
+  const rect = menu.getBoundingClientRect()
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const pad = 8 // 边距
+
+  let finalX = Math.max(pad, x - 4)
+  let finalY = Math.max(pad, y - 4)
+
+  // 右侧溢出检测
+  if (finalX + rect.width > vw - pad) {
+    finalX = vw - rect.width - pad
+  }
+
+  // 底部溢出检测
+  if (finalY + rect.height > vh - pad) {
+    finalY = vh - rect.height - pad
+  }
+
+  // 确保不小于最小边距
+  finalX = Math.max(pad, finalX)
+  finalY = Math.max(pad, finalY)
+
+  menu.style.left = finalX + 'px'
+  menu.style.top = finalY + 'px'
+  menu.style.visibility = 'visible'
+
   const handler = (e) => {
     try {
       if (menu && !menu.contains(e.target)) {
@@ -915,6 +1045,7 @@ async function openRowContextMenu(context, post, x, y) {
   }
   setTimeout(() => {
     document.addEventListener('mousedown', handler, { once: true, capture: true })
+    document.addEventListener('touchstart', handler, { once: true, capture: true }) // 新增触摸支持
   }, 0)
 }
 
@@ -1675,6 +1806,25 @@ async function renderPostTable() {
 
       const cellActions = document.createElement('div')
       cellActions.className = 'tm-typecho-td'
+
+      // 移动端：添加"更多操作"按钮
+      if (tmIsMobile()) {
+        const btnMore = document.createElement('button')
+        btnMore.className = 'tm-typecho-btn'
+        btnMore.textContent = '⋯ 更多操作'
+        btnMore.style.background = 'rgba(37,99,235,.06)'
+        btnMore.style.borderColor = '#2563eb'
+        btnMore.style.color = '#2563eb'
+        btnMore.addEventListener('click', (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          // 在按钮下方弹出菜单
+          const rect = btnMore.getBoundingClientRect()
+          void openRowContextMenu(globalContextRef, p, rect.left, rect.bottom + 4)
+        })
+        cellActions.appendChild(btnMore)
+      }
+
       const btnDl = document.createElement('button')
       btnDl.className = 'tm-typecho-btn'
       btnDl.textContent = '下载到本地'
@@ -1684,14 +1834,14 @@ async function renderPostTable() {
       const btnUpdate = document.createElement('button')
       btnUpdate.className = 'tm-typecho-btn'
       btnUpdate.textContent = '用当前文档更新'
-      btnUpdate.style.marginLeft = '6px'
+      btnUpdate.style.marginLeft = tmIsMobile() ? '0' : '6px'
       btnUpdate.addEventListener('click', () => { void publishCurrentForPost(globalContextRef, p) })
       cellActions.appendChild(btnUpdate)
 
       const btnRollback = document.createElement('button')
       btnRollback.className = 'tm-typecho-btn'
       btnRollback.textContent = '回滚'
-      btnRollback.style.marginLeft = '6px'
+      btnRollback.style.marginLeft = tmIsMobile() ? '0' : '6px'
       btnRollback.addEventListener('click', () => { void openRollbackDialog(globalContextRef, p) })
       cellActions.appendChild(btnRollback)
       row.appendChild(cellActions)
@@ -2868,6 +3018,7 @@ async function openSettingsDialog(context) {
 
 let globalContextRef = null
 let ctxMenuDisposers = []
+let resizeTimer = null
 
 async function openManager(context) {
   globalContextRef = context
@@ -2903,6 +3054,21 @@ export async function activate(context) {
       if (typeof disposePublish === 'function') ctxMenuDisposers.push(disposePublish)
     } catch {}
   }
+
+  // 监听窗口尺寸变化（横竖屏切换适配）
+  const handleResize = () => {
+    if (resizeTimer) clearTimeout(resizeTimer)
+    resizeTimer = setTimeout(() => {
+      // 重新应用移动端样式
+      if (overlayEl && !overlayEl.classList.contains('hidden')) {
+        updateFiltersPanelVisibility()
+        void renderPostTable() // 重绘表格以应用新的设备类型样式
+      }
+    }, 150)
+  }
+
+  window.addEventListener('resize', handleResize)
+  window.addEventListener('orientationchange', handleResize)
 }
 
 export function deactivate() {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2025-12-25T00:00:00Z",
+  "updatedAt": "2026-01-14T00:00:00Z",
   "ttlSeconds": 3600,
   "items": [
     {
@@ -386,6 +386,18 @@
       "install": {
         "ref": "https://raw.githubusercontent.com/flyhunterl/flymd/main/public/plugins/flymd-RAG/manifest.json",
         "type": "manifest"
+      }
+    },
+    {
+      "homepage": "https://github.com/TGU-HansJack/additional-suffix-plugin",
+      "name": "后缀扩展（ASP）",
+      "description": "通过插件声明额外后缀的展示与打开策略",
+      "author": "ZhiXu",
+      "id": "additional-suffix-plugin",
+      "category": "编辑增强",
+      "install": {
+        "ref": "TGU-HansJack/additional-suffix-plugin@main",
+        "type": "github"
       }
     }
   ]

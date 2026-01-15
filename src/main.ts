@@ -188,6 +188,7 @@ import { getUiZoom, setUiZoom, applyUiZoom, zoomIn, zoomOut, zoomReset, getPrevi
 import { showZoomBubble, showWidthBubble, NotificationManager, showModeChangeNotification, updateSyncStatus } from './core/uiNotifications'
 import type { NotificationType } from './core/uiNotifications'
 import { initAutoSave, type AutoSaveHandles } from './core/autoSave'
+import { initOnlineAnnouncements } from './core/onlineAnnouncements'
 
 // 滚动条自动隐藏
 import { initAutoHideScrollbar, rescanScrollContainers } from './core/scrollbar'
@@ -9254,6 +9255,8 @@ function bindEvents() {
 
     // 性能标记：首次渲染完成
     performance.mark('flymd-first-render')
+    // 在线公告（官网 announcements.json）：不阻塞启动，失败静默
+    try { initOnlineAnnouncements() } catch {}
 
     // 绑定扩展按钮（立即绑定，但延迟加载扩展）
     try { const btnExt = document.getElementById('btn-extensions'); if (btnExt) btnExt.addEventListener('click', () => { void panelShowExtensionsOverlay(true) }) } catch {}

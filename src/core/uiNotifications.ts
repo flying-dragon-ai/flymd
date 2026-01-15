@@ -103,6 +103,7 @@ export function showWidthBubble(): void {
 export type NotificationType =
   | 'sync'
   | 'extension'
+  | 'announcement'
   | 'appUpdate'
   | 'plugin-success'
   | 'plugin-error'
@@ -149,6 +150,11 @@ export class NotificationManager {
       icon: '🔔',
       bgColor: 'rgba(34,197,94,0.12)',
       duration: 5000
+    },
+    announcement: {
+      icon: '📢',
+      bgColor: 'rgba(59,130,246,0.12)',
+      duration: 12000
     },
     appUpdate: {
       icon: '⬆️',

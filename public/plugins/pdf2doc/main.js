@@ -226,7 +226,7 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
     const header = document.createElement('div')
     header.style.cssText =
       'padding:12px 16px;border-bottom:1px solid var(--border,#e5e7eb);font-weight:600;font-size:14px;background:rgba(127,127,127,.06);'
-    header.textContent = pdf2docText('余额风险提示', 'Quota risk warning')
+    header.textContent = pdf2docText('风险提示', 'Risk warning')
 
     const body = document.createElement('div')
     body.style.cssText = 'padding:14px 16px;font-size:13px;line-height:1.6;'
@@ -250,10 +250,16 @@ function showQuotaRiskDialog(context, pdfPages, remainPages) {
           ? pdf2docText('剩余解析页数为 0（不足以开始解析）', 'Remaining pages: 0 (not enough to start)')
           : pdf2docText('剩余解析页数不足以覆盖 PDF 页数，解析可能中断', 'Remaining pages are lower than PDF pages; parsing may stop early'))
       : ''
+    const docxHint = pdf2docText(
+      '多页数 PDF 建议先转换成 MD 再另存为 Docx，直接转换 Docx 的失败率较高。',
+      'For multi-page PDFs, convert to Markdown first and then export to DOCX; direct DOCX conversion has a higher failure rate.'
+    )
     msg.innerHTML = pdf2docText(
       `当前 PDF 页数：<strong>${pdfText}</strong> 页<br>剩余解析页数：<strong>${remainText}</strong> 页` +
+        `<br><span style="color:#dc2626;font-weight:600;">${docxHint}</span>` +
         (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : ''),
       `PDF pages: <strong>${pdfText}</strong><br>Remaining parse pages: <strong>${remainText}</strong>` +
+        `<br><span style="color:#dc2626;font-weight:600;">${docxHint}</span>` +
         (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : '')
     )
     body.appendChild(msg)
@@ -375,12 +381,14 @@ async function loadConfig(context) {
   const storedApiTokens = await context.storage.get('apiTokens')
   const apiTokens = normalizeApiTokens(storedApiTokens, legacyApiToken)
   const apiToken = getPrimaryApiToken({ apiTokens, apiToken: legacyApiToken })
+  const mdJobUser = (await context.storage.get('mdJobUser')) || ''
   const defaultOutput = (await context.storage.get('defaultOutput')) || 'markdown'
   const sendToAI = await context.storage.get('sendToAI')
   return {
     apiBaseUrl,
     apiToken,
     apiTokens,
+    mdJobUser: typeof mdJobUser === 'string' ? mdJobUser : String(mdJobUser || ''),
     defaultOutput: defaultOutput === 'docx' ? 'docx' : 'markdown',
     sendToAI: sendToAI ?? true
   }
@@ -390,9 +398,11 @@ async function loadConfig(context) {
 async function saveConfig(context, cfg) {
   const apiTokens = normalizeApiTokens(cfg && cfg.apiTokens, cfg && cfg.apiToken)
   const apiToken = getPrimaryApiToken({ apiTokens, apiToken: cfg && cfg.apiToken })
+  const mdJobUser = cfg && typeof cfg.mdJobUser === 'string' ? cfg.mdJobUser.trim() : String((cfg && cfg.mdJobUser) || '').trim()
   await context.storage.set('apiBaseUrl', cfg.apiBaseUrl)
   await context.storage.set('apiTokens', JSON.stringify(apiTokens))
   await context.storage.set('apiToken', apiToken)
+  await context.storage.set('mdJobUser', mdJobUser)
   await context.storage.set('defaultOutput', cfg.defaultOutput)
   await context.storage.set('sendToAI', cfg.sendToAI)
 }
@@ -484,6 +494,9 @@ async function uploadAndParsePdfFile(context, cfg, file, output, cancelSource) {
       'X-PDF2DOC-Version': PDF2DOC_COMPAT_VERSION
     }
     if (xApiTokens) headers['X-Api-Tokens'] = xApiTokens
+    // 仅用于 Markdown 分段解析的断点续跑：用“用户名”替代首 token 作为任务归属标识（不影响扣费 token）
+    const mdJobUser = cfg && typeof cfg.mdJobUser === 'string' ? cfg.mdJobUser.trim() : ''
+    if (out === 'markdown' && mdJobUser) headers['X-PDF2DOC-Job-User'] = mdJobUser
 
     let res
     try {
@@ -1402,6 +1415,7 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
       '.pdf2doc-progress-cancel-btn:active{transform:translateY(0);box-shadow:0 1px 2px rgba(185,28,28,.2);}',
       '.pdf2doc-progress-cancel-btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none;}',
       '.pdf2doc-progress-cancel-tip{font-size:12px;color:#6b7280;line-height:1.4;text-align:center;max-width:360px;}',
+      '.pdf2doc-progress-resume-tip{font-size:12px;color:#6b7280;line-height:1.4;text-align:center;max-width:360px;margin:8px auto 0;}',
       '.pdf2doc-progress-actions{display:none;justify-content:center;margin-top:12px;}',
       '.pdf2doc-progress-actions.show{display:flex;}',
       '.pdf2doc-progress-btn{padding:6px 16px;border-radius:10px;border:1px solid rgba(0,0,0,.12);background:#fff;color:#111827;cursor:pointer;font-size:12px;}'
@@ -1470,6 +1484,20 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     cancelWrap.appendChild(btnCancel)
     cancelWrap.appendChild(cancelTip)
     dialog.appendChild(cancelWrap)
+
+    const resumeTip = document.createElement('div')
+    resumeTip.className = 'pdf2doc-progress-resume-tip'
+    resumeTip.textContent =
+      output === 'markdown'
+        ? pdf2docText(
+            '如遇到失败，可重新解析。已完成解析的部分不会重复扣费。',
+            'If parsing fails, you can retry. Completed parts will not be billed again.'
+          )
+        : pdf2docText(
+            '如遇到失败，可重新解析。',
+            'If parsing fails, you can retry.'
+          )
+    dialog.appendChild(resumeTip)
 
     const actions = document.createElement('div')
     actions.className = 'pdf2doc-progress-actions'
@@ -1962,7 +1990,31 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
     rowToken.appendChild(boxToken)
     body.appendChild(rowToken)
 
-   
+    // Markdown 分段解析断点续跑“任务用户名”：仅用于断点归属，不影响扣费（扣费仍按密钥 token）
+    const rowJobUser = document.createElement('div')
+    rowJobUser.className = 'pdf2doc-settings-row'
+    const labJobUser = document.createElement('div')
+    labJobUser.className = 'pdf2doc-settings-label'
+    labJobUser.textContent = pdf2docText('用户名（断点）', 'Job user (resume)')
+    const boxJobUser = document.createElement('div')
+    const inputJobUser = document.createElement('input')
+    inputJobUser.type = 'text'
+    inputJobUser.className = 'pdf2doc-settings-input'
+    inputJobUser.placeholder = pdf2docText('用于断点续跑的用户名（可自定义）', 'A custom user id for resuming')
+    inputJobUser.value = cfg && typeof cfg.mdJobUser === 'string' ? cfg.mdJobUser : ''
+    const tipJobUser = document.createElement('div')
+    tipJobUser.className = 'pdf2doc-settings-desc'
+    tipJobUser.textContent = pdf2docText(
+      '仅用于判断 MD 解析任务中断后继续的关键标识：一旦有任务中断，请不要修改此用户名；修改后将无法继续之前的任务。',
+      'Used only for resuming interrupted Markdown parse jobs. If a job is interrupted, do not change this value; changing it will prevent resuming the previous job.'
+    )
+    boxJobUser.appendChild(inputJobUser)
+    boxJobUser.appendChild(tipJobUser)
+    rowJobUser.appendChild(labJobUser)
+    rowJobUser.appendChild(boxJobUser)
+    body.appendChild(rowJobUser)
+
+    
     const purchaseSection = document.createElement('div')
     purchaseSection.className = 'pdf2doc-settings-purchase-section'
 
@@ -2073,12 +2125,14 @@ async function showTranslateConfirmDialog(context, cfg, fileName, pages) {
       const apiToken = getPrimaryApiToken({ apiTokens, apiToken: '' })
       const defaultOutput =
         outSelect.value === 'docx' ? 'docx' : 'markdown'
+      const mdJobUser = String(inputJobUser.value || '').trim()
 
       document.body.removeChild(overlay)
       resolve({
         apiBaseUrl: DEFAULT_API_BASE,
         apiToken,
         apiTokens,
+        mdJobUser,
         defaultOutput,
         sendToAI: cfg.sendToAI ?? true
       })

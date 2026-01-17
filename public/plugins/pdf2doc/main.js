@@ -115,6 +115,188 @@ function maskApiTokenForDisplay(token) {
   return t.slice(0, 4) + '…' + t.slice(-4)
 }
 
+async function fetchTotalRemainPages(context, cfg) {
+  try {
+    if (!context || !context.http || typeof context.http.fetch !== 'function') return null
+
+    let apiUrl = (cfg.apiBaseUrl || DEFAULT_API_BASE).trim()
+    if (apiUrl.endsWith('/pdf')) {
+      apiUrl += '/'
+    }
+
+    const enabledTokens = getEnabledApiTokens(cfg).map(it => it.token).filter(Boolean)
+    const primaryToken = getPrimaryApiToken(cfg)
+    if (!primaryToken) return null
+
+    const headers = {
+      Authorization: 'Bearer ' + primaryToken
+    }
+    if (enabledTokens.length > 1) {
+      headers['X-Api-Tokens'] = JSON.stringify(enabledTokens)
+    }
+
+    const res = await context.http.fetch(apiUrl, {
+      method: 'GET',
+      headers
+    })
+
+    const text = await res.text()
+    const data = text ? JSON.parse(text) : null
+    if (!res || res.status < 200 || res.status >= 300 || !data || data.ok !== true) return null
+
+    const total = data.total_pages ?? 0
+    const used = data.used_pages ?? 0
+    const remain = data.remain_pages ?? Math.max(0, total - used)
+    return typeof remain === 'number' ? remain : parseInt(String(remain || '0'), 10) || 0
+  } catch {
+    return null
+  }
+}
+
+function showQuotaRiskDialog(context, pdfPages, remainPages) {
+  return new Promise(resolve => {
+    if (typeof document === 'undefined') {
+      resolve({ action: 'continue' })
+      return
+    }
+
+    const overlay = document.createElement('div')
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:90030;'
+
+    const dialog = document.createElement('div')
+    dialog.style.cssText =
+      'width:520px;max-width:calc(100% - 40px);background:var(--bg,#fff);color:var(--fg,#333);border-radius:12px;border:1px solid var(--border,#e5e7eb);box-shadow:0 20px 50px rgba(0,0,0,.28);overflow:hidden;'
+
+    const header = document.createElement('div')
+    header.style.cssText =
+      'padding:12px 16px;border-bottom:1px solid var(--border,#e5e7eb);font-weight:600;font-size:14px;background:rgba(127,127,127,.06);'
+    header.textContent = pdf2docText('余额风险提示', 'Quota risk warning')
+
+    const body = document.createElement('div')
+    body.style.cssText = 'padding:14px 16px;font-size:13px;line-height:1.6;'
+
+    const msg = document.createElement('div')
+    const safeRemain = typeof remainPages === 'number' && remainPages > 0 ? remainPages : 0
+    const pct = safeRemain > 0 ? Math.round((pdfPages / safeRemain) * 100) : 999
+    const pctColor = pct > 50 ? '#dc2626' : (pct <= 40 ? '#16a34a' : '#b45309')
+    const pctText = safeRemain > 0 ? `${pct}%` : pdf2docText('未知', 'unknown')
+    const compareText =
+      safeRemain <= 0
+        ? pdf2docText(
+            '当前剩余解析页数为 0（不足以开始解析）',
+            'Remaining parse pages: 0 (not enough to start)'
+          )
+        : safeRemain < pdfPages
+          ? pdf2docText(
+              '当前剩余解析页数不足以覆盖原 PDF 页数（按原页数就可能中断）',
+              'Remaining pages are lower than the original PDF pages (may stop early)'
+            )
+          : pdf2docText(
+              '按原 PDF 页数，余额足够覆盖，但实际计费页数可能更高',
+              'Balance covers the original PDF pages, but billable pages may be higher'
+            )
+    const compareColor = safeRemain <= 0 || safeRemain < pdfPages ? '#dc2626' : '#16a34a'
+    const pctLine = pdf2docText(
+      `当前解析页数约为剩余页数的 <span style="color:${pctColor};font-weight:600;">${pctText}</span>`,
+      `Estimated ratio: <span style="color:${pctColor};font-weight:600;">${pctText}</span> of remaining pages`
+    )
+    const recommendLine = pdf2docText(
+      '建议：普通排版/少图 PDF，尽量不超过 <span style="font-weight:600;">70%</span>；复杂排版/多图，尽量不超过 <span style="font-weight:600;">50%</span>。',
+      'Suggestion: simple/low-image PDFs keep under 70%; complex/image-heavy keep under 50%.'
+    )
+    const warnLine = pdf2docText(
+      '如果 PDF 排版复杂/图片较多，实际计费页数会明显高于原 PDF 页数（甚至翻倍），可能会无法完成整个文档的解析。',
+      'If the PDF has complex layout or many images, billable pages can be much higher than the original (even doubled), and the full parse may not finish.'
+    )
+    const warnHtml = `<span style="color:#dc2626;font-weight:600;">${warnLine}</span>`
+    const recommendHtml = `<span style="color:#6b7280;">${recommendLine}</span>`
+    msg.innerHTML = pdf2docText(
+      `当前 PDF 页数：<strong>${pdfPages}</strong> 页<br>剩余解析页数：<strong>${remainPages}</strong> 页<br><span style="color:${compareColor};font-weight:600;">${compareText}</span><br>${pctLine}<br>${recommendHtml}<br><br>${warnHtml}`,
+      `PDF pages: <strong>${pdfPages}</strong><br>Remaining parse pages: <strong>${remainPages}</strong><br><span style="color:${compareColor};font-weight:600;">${compareText}</span><br>${pctLine}<br>${recommendHtml}<br><br>${warnHtml}`
+    )
+    body.appendChild(msg)
+
+    const footer = document.createElement('div')
+    footer.style.cssText =
+      'padding:10px 16px;border-top:1px solid var(--border,#e5e7eb);display:flex;justify-content:flex-end;gap:8px;background:rgba(127,127,127,.03);'
+
+    const btnCancel = document.createElement('button')
+    btnCancel.type = 'button'
+    btnCancel.style.cssText =
+      'padding:6px 12px;border-radius:8px;border:1px solid var(--border,#e5e7eb);background:var(--bg,#fff);color:var(--fg,#333);cursor:pointer;font-size:12px;'
+    btnCancel.textContent = pdf2docText('取消', 'Cancel')
+
+    const btnRecharge = document.createElement('button')
+    btnRecharge.type = 'button'
+    btnRecharge.style.cssText =
+      'padding:6px 12px;border-radius:8px;border:1px solid #2563eb;background:#fff;color:#2563eb;cursor:pointer;font-size:12px;'
+    btnRecharge.textContent = pdf2docText('充值/查询', 'Top up / Check')
+
+    const btnOk = document.createElement('button')
+    btnOk.type = 'button'
+    btnOk.style.cssText =
+      'padding:6px 14px;border-radius:8px;border:1px solid #2563eb;background:#2563eb;color:#fff;cursor:pointer;font-size:12px;font-weight:500;'
+    btnOk.textContent = pdf2docText('确定继续解析', 'Continue')
+
+    const done = (action) => {
+      try {
+        document.body.removeChild(overlay)
+      } catch {}
+      resolve({ action })
+    }
+
+    btnCancel.onclick = () => done('cancel')
+    btnRecharge.onclick = () => done('recharge')
+    btnOk.onclick = () => done('continue')
+    overlay.onclick = (e) => {
+      if (e.target === overlay) done('cancel')
+    }
+    dialog.onclick = (e) => e.stopPropagation()
+
+    footer.appendChild(btnCancel)
+    footer.appendChild(btnRecharge)
+    footer.appendChild(btnOk)
+
+    dialog.appendChild(header)
+    dialog.appendChild(body)
+    dialog.appendChild(footer)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+  })
+}
+
+async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint) {
+  try {
+    if (!context || typeof context.getPdfPageCount !== 'function') return true
+
+    const remain = await fetchTotalRemainPages(context, cfg)
+    if (typeof remain !== 'number') return true
+
+    let pdfPages = typeof pdfPagesHint === 'number' ? pdfPagesHint : 0
+    if (!pdfPages) {
+      const n = await context.getPdfPageCount(pdfBytes)
+      pdfPages = typeof n === 'number' ? n : parseInt(String(n || '0'), 10) || 0
+    }
+    if (!pdfPages) return true
+
+    if (pdfPages > remain * 0.5) {
+      const ret = await showQuotaRiskDialog(context, pdfPages, remain)
+      const action = ret && ret.action ? ret.action : 'cancel'
+      if (action === 'recharge') {
+        try { await openSettings(context) } catch {}
+        return false
+      }
+      if (action === 'cancel') return false
+    }
+
+    return true
+  } catch {
+    // 风险提示失败不应阻断主流程
+    return true
+  }
+}
+
 
 async function loadConfig(context) {
   const apiBaseUrl =
@@ -1641,6 +1823,15 @@ export async function activate(context) {
 
             const file = await pickPdfFile()
 
+            // 解析前做额度风险提示：当 PDF 页数超过剩余额度的 50% 时提示用户
+            if (typeof context.getPdfPageCount === 'function') {
+              try {
+                const buf = await file.arrayBuffer()
+                const ok = await confirmQuotaRiskBeforeParse(context, cfg, buf)
+                if (!ok) return
+              } catch {}
+            }
+
             if (context.ui.showNotification) {
               loadingId = context.ui.showNotification(
                 pdf2docText('正在解析 PDF，请稍候...', 'Parsing PDF, please wait...'),
@@ -1873,6 +2064,13 @@ export async function activate(context) {
               return
             }
 
+            const bytes = await context.readFileBinary(path)
+            const fileName = path.split(/[\\/]+/).pop() || 'document.pdf'
+
+            // 解析前做额度风险提示：当 PDF 页数超过剩余额度的 50% 时提示用户
+            const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes)
+            if (!ok) return
+
             if (context.ui.showNotification) {
               loadingId = context.ui.showNotification(
                 pdf2docText('正在解析为MD，中间可能闪烁，完成前请勿关闭程序！', 'Parsing to Markdown. The sidebar may flicker; please do not close the app until it finishes.'),
@@ -1889,8 +2087,6 @@ export async function activate(context) {
               )
             }
 
-            const bytes = await context.readFileBinary(path)
-            const fileName = path.split(/[\\/]+/).pop() || 'document.pdf'
             const result = await parsePdfBytes(context, cfg, bytes, fileName, 'markdown')
 
             if (loadingId && context.ui.hideNotification) {
@@ -1997,6 +2193,13 @@ export async function activate(context) {
               return
             }
 
+            const bytes = await context.readFileBinary(path)
+            const fileName = path.split(/[\\/]+/).pop() || 'document.pdf'
+
+            // 解析前做额度风险提示：当 PDF 页数超过剩余额度的 50% 时提示用户
+            const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes)
+            if (!ok) return
+
             if (context.ui.showNotification) {
               loadingId = context.ui.showNotification(
                 pdf2docText('正在解析当前 PDF 为 Docx...', 'Parsing current PDF to DOCX...'),
@@ -2013,8 +2216,6 @@ export async function activate(context) {
               )
             }
 
-            const bytes = await context.readFileBinary(path)
-            const fileName = path.split(/[\\/]+/).pop() || 'document.pdf'
             const result = await parsePdfBytes(context, cfg, bytes, fileName, 'docx')
 
             if (loadingId && context.ui.hideNotification) {
@@ -2168,6 +2369,12 @@ export async function activate(context) {
                   )
                   return
                 }
+                const bytes = await context.readFileBinary(path)
+
+                // 解析前做额度风险提示：当 PDF 页数超过剩余额度的 50% 时提示用户
+                const ok = await confirmQuotaRiskBeforeParse(context, cfg, bytes)
+                if (!ok) return
+
                 if (context.ui.showNotification) {
                   loadingId = context.ui.showNotification(
                     pdf2docText('正在解析当前 PDF...', 'Parsing current PDF...'),
@@ -2184,7 +2391,6 @@ export async function activate(context) {
                   )
                 }
 
-                const bytes = await context.readFileBinary(path)
                 const result = await parsePdfBytes(
                   context,
                   cfg,
@@ -2228,6 +2434,15 @@ export async function activate(context) {
                   3000
                 )
                 return
+              }
+
+              // 解析前做额度风险提示：当 PDF 页数超过剩余额度的 50% 时提示用户
+              if (typeof context.getPdfPageCount === 'function') {
+                try {
+                  const buf = await file.arrayBuffer()
+                  const ok = await confirmQuotaRiskBeforeParse(context, cfg, buf)
+                  if (!ok) return
+                } catch {}
               }
 
               if (context.ui.showNotification) {

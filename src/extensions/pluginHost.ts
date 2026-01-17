@@ -1428,6 +1428,49 @@ export function createPluginHost(
           throw e
         }
       },
+      // 获取 PDF 页数：供插件在解析前做额度风险提示（不保证所有环境都可用）
+      getPdfPageCount: async (
+        bytes: Uint8Array | ArrayBuffer | number[],
+      ): Promise<number> => {
+        try {
+          let data: Uint8Array
+          if (bytes instanceof Uint8Array) {
+            data = bytes
+          } else if (bytes instanceof ArrayBuffer) {
+            data = new Uint8Array(bytes)
+          } else if (Array.isArray(bytes)) {
+            data = new Uint8Array(bytes)
+          } else if ((bytes as any)?.buffer instanceof ArrayBuffer) {
+            data = new Uint8Array((bytes as any).buffer)
+          } else {
+            throw new Error('bytes 必须是 Uint8Array / ArrayBuffer / number[]')
+          }
+
+          // 动态加载 pdfjs-dist（若打包裁剪导致不可用，则报错给插件决定是否降级）
+          const mod: any = await import('pdfjs-dist')
+          const pdfjs: any =
+            mod && (mod as any).getDocument
+              ? mod
+              : (mod && (mod as any).default ? (mod as any).default : mod)
+          if (!pdfjs || typeof (pdfjs as any).getDocument !== 'function') {
+            throw new Error('PDF.js 不可用')
+          }
+
+          // 这里强制禁用 worker：只读页数，避免 worker 依赖导致的兼容性问题
+          const task = (pdfjs as any).getDocument({
+            data,
+            disableWorker: true,
+          })
+          const doc = (task as any).promise ? await (task as any).promise : await task
+          const n = (doc && typeof doc.numPages === 'number') ? doc.numPages : 0
+          try { await doc?.destroy?.() } catch {}
+          try { await task?.destroy?.() } catch {}
+          return (n >>> 0) || 0
+        } catch (e) {
+          console.error(`[Plugin ${p.id}] getPdfPageCount 失败:`, e)
+          throw e
+        }
+      },
       writeFileBinary: async (
         absPath: string,
         bytes: Uint8Array | ArrayBuffer | number[],

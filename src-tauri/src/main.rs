@@ -1659,6 +1659,35 @@ fn main() {
   #[cfg(target_os = "macos")]
   let builder = builder.plugin(init_macos_open_plugin());
 
+  // 桌面端：给命令面板注册原生加速键 CmdOrCtrl+Shift+P。
+  // 关键点：PDF 预览是 iframe 加载本地 PDF，键盘事件不会冒泡到主文档；
+  //         只能靠原生层捕获，再转发给前端。
+  #[cfg(desktop)]
+  let builder = builder
+    .menu(|handle| {
+      use tauri::menu::{Menu, MenuItem, Submenu};
+
+      let menu = Menu::default(handle)?;
+      let cmd = MenuItem::with_id(
+        handle,
+        "flymd.command_palette",
+        "命令面板",
+        true,
+        Some("CmdOrCtrl+Shift+P"),
+      )?;
+      let sub = Submenu::with_id_and_items(handle, "flymd.menu", "FlyMD", true, &[&cmd])?;
+      menu.append_items(&[&sub])?;
+      Ok(menu)
+    })
+    .on_menu_event(|app, event| {
+      if event.id() != "flymd.command_palette" {
+        return;
+      }
+      if let Some(win) = app.get_webview_window("main") {
+        let _ = win.emit("flymd://command-palette", ());
+      }
+    });
+
   let builder = builder
     .invoke_handler(tauri::generate_handler![
         upload_to_s3,
@@ -1729,6 +1758,10 @@ fn main() {
       }
       // 其它初始化逻辑
       if let Some(win) = app.get_webview_window("main") {
+        // 非 macOS：默认隐藏菜单栏，避免新增菜单影响现有 UI（但加速键仍然可用）。
+        #[cfg(not(target_os = "macos"))]
+        let _ = win.hide_menu();
+
         #[cfg(target_os = "windows")]
         {
           install_windows_maximized_resizable_workaround(&win);

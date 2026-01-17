@@ -9267,6 +9267,16 @@ function bindEvents() {
             showError('打开方式参数处理失败', err)
           }
         })
+        // PDF 预览里，键盘事件会被 iframe/原生 PDF 渲染吞掉，主文档收不到 Ctrl+Shift+P。
+        // 桌面端用原生菜单加速键捕获后，转发到前端在 PDF 模式下打开命令面板。
+        await mod.listen('flymd://command-palette', () => {
+          try {
+            const p = String(currentFilePath || '')
+            if (!p.toLowerCase().endsWith('.pdf')) return
+            if (isCommandPaletteOpen()) closeCommandPalette()
+            else void openCommandPalette()
+          } catch {}
+        })
       }
     } catch {
       // 非 Tauri 环境或事件 API 不可用，忽略

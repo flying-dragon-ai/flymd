@@ -837,16 +837,18 @@ body.compact-titlebar .window-btn.window-close:hover {
 .preview {
   position: absolute;
   top: 0;
-  left: 0;
-  right: 0;
+  /* 预览区本身也要“让出”左右占位：否则滚动条会被右侧剥离大纲/插件面板遮住 */
+  left: var(--workspace-left-gap, 0px);
+  right: var(--workspace-right-gap, 0px);
   bottom: var(--workspace-bottom-gap, 0px);
   /* 仅显示竖向滚动条，隐藏横向滚动条，避免页面抖动且更清爽 */
   overflow-y: auto;
   overflow-x: auto; /* 允许宽内容横向滚动 */
   padding-top: 16px;
   padding-bottom: 40px;
-  padding-left: calc(20px + var(--workspace-left-gap, 0px));
-  padding-right: calc(20px + var(--workspace-right-gap, 0px));
+  /* 内容 padding 保持固定值；左右占位由 left/right 负责，避免“占位被算两次” */
+  padding-left: 20px;
+  padding-right: 20px;
   background: var(--bg); color: var(--fg);
   /* 改进预览区域的字体和可读性 */
   font-family: var(--font-body, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji");
@@ -882,9 +884,9 @@ body.compact-titlebar .window-btn.window-close:hover {
 }
 .container.split-preview:not(.wysiwyg):not(.wysiwyg-v2) .preview {
   left: var(--split-ratio, 55%);
-  right: 0;
+  right: var(--workspace-right-gap, 0px);
   padding-left: 16px;
-  padding-right: calc(20px + var(--workspace-right-gap, 0px));
+  padding-right: 20px;
 }
 /* 分屏模式：中间竖直分割线 */
 .container.split-preview:not(.wysiwyg):not(.wysiwyg-v2)::before {
@@ -1880,7 +1882,8 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 }
 .lib-outline.outline-floating.side-right {
   /* 右侧：始终贴在右侧 dock/插件面板的左边缘；若无插件则贴容器右侧 */
-  right: calc(var(--gap-right-library, 0px) + var(--dock-right-gap, 0px) + var(--outline-right-offset, 0px));
+  /* 注意：自动隐藏热区会覆盖到预览滚动条，额外留出一条“滚动条安全带”（由 JS 按需写入） */
+  right: calc(var(--gap-right-library, 0px) + var(--dock-right-gap, 0px) + var(--outline-right-offset, 0px) + var(--outline-edge-gutter, 0px));
 }
 
 /* 大纲自动隐藏：不占位，通过 transform 滑入/滑出（类似侧栏） */
@@ -1919,7 +1922,8 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   left: calc(var(--gap-left-library, 0px) + var(--outline-left-offset, 0px));
 }
 .outline-edge.side-right {
-  right: calc(var(--gap-right-library, 0px) + var(--dock-right-gap, 0px) + var(--outline-right-offset, 0px));
+  /* 给预览滚动条留空，不然 hover 到最右侧时滚动条永远出不来 */
+  right: calc(var(--gap-right-library, 0px) + var(--dock-right-gap, 0px) + var(--outline-right-offset, 0px) + var(--outline-edge-gutter, 0px));
 }
 
 .lib-outline .ol-item {

@@ -339,6 +339,10 @@ export function applyOutlineDockUi(): void {
 
     updateOutlineOffsets(container, library)
 
+    // 默认不留“滚动条安全带”；仅在右侧自动隐藏时开启。
+    // 否则预览滚动条会被 outline-edge 盖住，导致“最右侧滚动条不可见/不可拖拽”。
+    try { container.style.setProperty('--outline-edge-gutter', '0px') } catch {}
+
     // 嵌入布局：不显示大纲固定按钮，不启用自动隐藏
     if (layout === 'embedded') {
       try { edge && (edge.style.display = 'none') } catch {}
@@ -361,6 +365,12 @@ export function applyOutlineDockUi(): void {
       clearLeaveTimer()
       return
     }
+
+    // 右侧自动隐藏：给预览滚动条留一条安全带，让鼠标能触发/拖拽滚动条。
+    // 这是纯 UI 细节：不改变大纲功能，只避免覆盖滚动条。
+    try {
+      if (layout === 'right') container.style.setProperty('--outline-edge-gutter', '18px')
+    } catch {}
 
     // 自动隐藏：确保 hover 绑定
     ensureHoverBound(outline, edge)

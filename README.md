@@ -1,7 +1,5 @@
 
-<p align="center">
-  <strong>仅 7MB,免费且强大的 Markdown 编辑 / PDF 阅读工具</strong>
-</p>
+
 
 <p align="center">
   <a href="README.md">简体中文</a> | <a href="README.en.md">English</a>
@@ -27,6 +25,8 @@
 ## 简介
 
 FlyMD 是一款轻量级、高性能的本地 Markdown 编辑器,支持 PDF 高精度解析、AI 辅助写作、智能待办提醒等功能。本地优先,数据安全可控,开箱即用。
+
+<img width="1920" height="1080" alt="hero" src="https://github.com/user-attachments/assets/acf758c1-6c8e-4b4f-a313-d4ce2190394b" />
 
 ---
 

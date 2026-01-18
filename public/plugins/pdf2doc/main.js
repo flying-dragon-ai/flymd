@@ -409,6 +409,171 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
   })
 }
 
+// 截取页范围对话框：输入起止页（1-based）
+// 返回 { confirmed: boolean, from: number, to: number }
+function showExtractRangeDialog(fileName, pagesHint) {
+  return new Promise(resolve => {
+    if (typeof document === 'undefined') {
+      resolve({ confirmed: false, from: 0, to: 0 })
+      return
+    }
+
+    const totalPagesRaw =
+      typeof pagesHint === 'number'
+        ? pagesHint
+        : parseInt(pagesHint || '', 10)
+    const totalPages =
+      Number.isFinite(totalPagesRaw) && totalPagesRaw > 0
+        ? totalPagesRaw
+        : 0
+
+    const overlay = document.createElement('div')
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:90035;'
+
+    const dialog = document.createElement('div')
+    dialog.style.cssText =
+      'width:460px;max-width:calc(100% - 40px);background:var(--bg,#fff);color:var(--fg,#333);border-radius:12px;border:1px solid var(--border,#e5e7eb);box-shadow:0 20px 50px rgba(0,0,0,.28);overflow:hidden;'
+
+    const header = document.createElement('div')
+    header.style.cssText =
+      'padding:12px 16px;border-bottom:1px solid var(--border,#e5e7eb);font-weight:600;font-size:14px;background:rgba(127,127,127,.06);'
+    header.textContent = pdf2docText('截取PDF页范围', 'Extract PDF page range')
+
+    const body = document.createElement('div')
+    body.style.cssText = 'padding:12px 16px;font-size:13px;line-height:1.6;'
+
+    const nameRow = document.createElement('div')
+    nameRow.style.marginBottom = '10px'
+    nameRow.style.whiteSpace = 'nowrap'
+    nameRow.style.overflow = 'hidden'
+    nameRow.style.textOverflow = 'ellipsis'
+    nameRow.innerHTML = pdf2docText(
+      '当前PDF：<strong>' + (fileName || '未命名.pdf') + '</strong>',
+      'Current PDF: <strong>' + (fileName || 'Untitled.pdf') + '</strong>'
+    )
+
+    const hintRow = document.createElement('div')
+    hintRow.style.marginBottom = '10px'
+    hintRow.style.color = 'var(--muted,#4b5563)'
+    hintRow.style.fontSize = '12px'
+    hintRow.textContent = totalPages > 0
+      ? pdf2docText('总页数：' + totalPages + '（页码从 1 开始）', 'Total pages: ' + totalPages + ' (1-based)')
+      : pdf2docText('页码从 1 开始（当前无法自动获取总页数）', 'Pages are 1-based (total pages unavailable)')
+
+    const formRow = document.createElement('div')
+    formRow.style.cssText = 'display:flex;gap:14px;align-items:center;flex-wrap:wrap;'
+
+    const fromWrap = document.createElement('div')
+    fromWrap.style.cssText = 'display:flex;gap:8px;align-items:center;'
+    const toWrap = document.createElement('div')
+    toWrap.style.cssText = 'display:flex;gap:8px;align-items:center;'
+
+    const fromLabel = document.createElement('div')
+    fromLabel.style.cssText = 'color:var(--muted,#4b5563);font-size:12px;'
+    fromLabel.textContent = pdf2docText('起始页（from）', 'From page')
+    const fromInput = document.createElement('input')
+    fromInput.type = 'number'
+    fromInput.min = '1'
+    fromInput.step = '1'
+    fromInput.placeholder = '1'
+    fromInput.value = '1'
+    fromInput.style.cssText =
+      'width:92px;padding:5px 8px;border-radius:8px;border:1px solid var(--border,#e5e7eb);background:var(--bg,#fff);color:var(--fg,#111827);font-size:12px;'
+    fromWrap.appendChild(fromLabel)
+    fromWrap.appendChild(fromInput)
+
+    const toLabel = document.createElement('div')
+    toLabel.style.cssText = 'color:var(--muted,#4b5563);font-size:12px;'
+    toLabel.textContent = pdf2docText('结束页（to）', 'To page')
+    const toInput = document.createElement('input')
+    toInput.type = 'number'
+    toInput.min = '1'
+    toInput.step = '1'
+    toInput.placeholder = totalPages > 0 ? String(totalPages) : ''
+    toInput.value = totalPages > 0 ? String(totalPages) : '1'
+    toInput.style.cssText =
+      'width:92px;padding:5px 8px;border-radius:8px;border:1px solid var(--border,#e5e7eb);background:var(--bg,#fff);color:var(--fg,#111827);font-size:12px;'
+    toWrap.appendChild(toLabel)
+    toWrap.appendChild(toInput)
+
+    formRow.appendChild(fromWrap)
+    formRow.appendChild(toWrap)
+
+    const errRow = document.createElement('div')
+    errRow.style.cssText = 'margin-top:8px;color:#dc2626;font-size:12px;min-height:18px;'
+
+    const footer = document.createElement('div')
+    footer.style.cssText =
+      'padding:10px 16px;border-top:1px solid var(--border,#e5e7eb);display:flex;justify-content:flex-end;gap:8px;background:rgba(127,127,127,.03);'
+
+    const btnCancel = document.createElement('button')
+    btnCancel.type = 'button'
+    btnCancel.style.cssText =
+      'padding:6px 12px;border-radius:8px;border:1px solid var(--border,#e5e7eb);background:var(--bg,#fff);color:var(--fg,#333);cursor:pointer;font-size:12px;'
+    btnCancel.textContent = pdf2docText('取消', 'Cancel')
+
+    const btnOk = document.createElement('button')
+    btnOk.type = 'button'
+    btnOk.style.cssText =
+      'padding:6px 14px;border-radius:8px;border:1px solid #2563eb;background:#2563eb;color:#fff;cursor:pointer;font-size:12px;font-weight:500;'
+    btnOk.textContent = pdf2docText('截取', 'Extract')
+
+    const done = (confirmed, from, to) => {
+      try { document.body.removeChild(overlay) } catch {}
+      resolve({ confirmed, from, to })
+    }
+
+    const validate = () => {
+      const from = parseInt(String(fromInput.value || ''), 10) || 0
+      const to = parseInt(String(toInput.value || ''), 10) || 0
+      if (from <= 0 || to <= 0) {
+        errRow.textContent = pdf2docText('请输入有效页码（>=1）', 'Please enter valid pages (>=1)')
+        return null
+      }
+      if (to < from) {
+        errRow.textContent = pdf2docText('结束页不能小于起始页', 'To page must be >= from page')
+        return null
+      }
+      if (totalPages > 0 && (from > totalPages || to > totalPages)) {
+        errRow.textContent = pdf2docText('页码超出总页数：' + totalPages, 'Page exceeds total: ' + totalPages)
+        return null
+      }
+      errRow.textContent = ''
+      return { from, to }
+    }
+
+    btnCancel.onclick = () => done(false, 0, 0)
+    btnOk.onclick = () => {
+      const v = validate()
+      if (!v) return
+      done(true, v.from, v.to)
+    }
+    overlay.onclick = (e) => {
+      if (e.target === overlay) done(false, 0, 0)
+    }
+    dialog.onclick = (e) => e.stopPropagation()
+    fromInput.oninput = () => validate()
+    toInput.oninput = () => validate()
+
+    footer.appendChild(btnCancel)
+    footer.appendChild(btnOk)
+
+    body.appendChild(nameRow)
+    body.appendChild(hintRow)
+    body.appendChild(formRow)
+    body.appendChild(errRow)
+
+    dialog.appendChild(header)
+    dialog.appendChild(body)
+    dialog.appendChild(footer)
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+
+    try { fromInput.focus() } catch {}
+  })
+}
+
 function isPathInDir(filePath, dirPath) {
   const fp = String(filePath || '').replace(/\\/g, '/')
   const dp = String(dirPath || '').replace(/\\/g, '/')
@@ -542,6 +707,129 @@ async function requestSplitPdf(context, cfg, pdfBytes, fileName) {
   }
 
   return data
+}
+
+async function requestExtractPdfRange(context, cfg, pdfBytes, fileName, fromPage, toPage) {
+  if (!context || !context.http || typeof context.http.fetch !== 'function') {
+    throw new Error(pdf2docText('当前环境不支持网络请求', 'HTTP requests are not supported in this environment'))
+  }
+
+  const from = typeof fromPage === 'number' ? fromPage : parseInt(String(fromPage || '0'), 10) || 0
+  const to = typeof toPage === 'number' ? toPage : parseInt(String(toPage || '0'), 10) || 0
+  if (from <= 0 || to <= 0 || to < from) {
+    throw new Error(pdf2docText('页范围参数错误', 'Invalid page range'))
+  }
+
+  let apiUrl = (cfg.apiBaseUrl || DEFAULT_API_BASE).trim()
+  if (apiUrl.endsWith('/pdf')) {
+    apiUrl += '/'
+  }
+  const extractUrl = apiUrl.replace(/\/+$/, '/') + 'extract.php'
+  const cleanupUrl = apiUrl.replace(/\/+$/, '/') + 'extract_cleanup.php'
+
+  const candidates = getEnabledApiTokens(cfg).map(it => it.token).filter(Boolean)
+  const legacy = String(cfg.apiToken || '').trim()
+  if (candidates.length === 0 && legacy) candidates.push(legacy)
+  if (candidates.length === 0) {
+    throw new Error(pdf2docText('未配置密钥', 'Token is not configured'))
+  }
+
+  const token = candidates[0]
+  const xApiTokens = candidates.length > 1 ? JSON.stringify(candidates) : ''
+
+  const arr = pdfBytes instanceof Uint8Array
+    ? pdfBytes
+    : (pdfBytes instanceof ArrayBuffer
+      ? new Uint8Array(pdfBytes)
+      : new Uint8Array(pdfBytes || []))
+
+  const blob = new Blob([arr], { type: 'application/pdf' })
+  const safeName = (String(fileName || '').trim() || 'document.pdf').replace(/[\\/:*?"<>|]+/g, '_')
+  const finalName = /\.pdf$/i.test(safeName) ? safeName : (safeName + '.pdf')
+  const file = new File([blob], finalName, { type: 'application/pdf' })
+
+  const form = new FormData()
+  form.append('file', file, file.name)
+  form.append('from_page', String(from))
+  form.append('to_page', String(to))
+
+  const headers = {
+    Authorization: 'Bearer ' + token,
+    'X-PDF2DOC-Version': PDF2DOC_COMPAT_VERSION
+  }
+  if (xApiTokens) headers['X-Api-Tokens'] = xApiTokens
+
+  let res
+  try {
+    res = await context.http.fetch(extractUrl, {
+      method: 'POST',
+      headers,
+      body: form
+    })
+  } catch (e) {
+    throw new Error(pdf2docText('网络请求失败：' + (e && e.message ? e.message : String(e)), 'Network request failed: ' + (e && e.message ? e.message : String(e))))
+  }
+
+  let data = null
+  try {
+    data = await res.json()
+  } catch (e) {
+    throw new Error(pdf2docText('响应格式错误', 'Invalid response format'))
+  }
+
+  if (!data || typeof data !== 'object') {
+    throw new Error(pdf2docText('响应格式错误', 'Invalid response format'))
+  }
+  if (!res || res.status < 200 || res.status >= 300) {
+    const msg = data && (data.message || data.error) ? String(data.message || data.error) : ''
+    if (msg) throw new Error(msg)
+    throw new Error(pdf2docText('请求失败（HTTP ' + (res ? res.status : '?') + '）', 'Request failed (HTTP ' + (res ? res.status : '?') + ')'))
+  }
+  if (!data.ok) {
+    const msg = data.message || data.error || pdf2docText('截取失败', 'Extract failed')
+    throw new Error(String(msg))
+  }
+
+  const job = data.job ? String(data.job) : ''
+  const url = data.file && data.file.url ? String(data.file.url) : ''
+  const suggested = data.file && data.file.suggested_name ? String(data.file.suggested_name) : ''
+  if (!job || !url) {
+    throw new Error(pdf2docText('截取结果为空', 'Empty extract result'))
+  }
+
+  return { job, url, suggestedName: suggested, cleanupUrl }
+}
+
+async function cleanupExtractJob(context, cfg, jobId, cleanupUrl) {
+  if (!context || !context.http || typeof context.http.fetch !== 'function') return false
+
+  const candidates = getEnabledApiTokens(cfg).map(it => it.token).filter(Boolean)
+  const legacy = String(cfg.apiToken || '').trim()
+  if (candidates.length === 0 && legacy) candidates.push(legacy)
+  if (candidates.length === 0) return false
+
+  const token = candidates[0]
+  const xApiTokens = candidates.length > 1 ? JSON.stringify(candidates) : ''
+  const headers = {
+    Authorization: 'Bearer ' + token,
+    'X-PDF2DOC-Version': PDF2DOC_COMPAT_VERSION
+  }
+  if (xApiTokens) headers['X-Api-Tokens'] = xApiTokens
+
+  const form = new FormData()
+  form.append('job', String(jobId || ''))
+
+  try {
+    const res = await context.http.fetch(String(cleanupUrl || ''), {
+      method: 'POST',
+      headers,
+      body: form
+    })
+    const data = await res.json().catch(() => null)
+    return !!(res && res.status >= 200 && res.status < 300 && data && data.ok === true)
+  } catch {
+    return false
+  }
 }
 
 async function writeTextFileRenameAuto(context, absPath, content) {
@@ -2907,6 +3195,135 @@ export async function activate(context) {
                   'Image parse failed: ' + (err && err.message ? err.message : String(err))
                 ),
                 'err'
+              )
+            }
+          }
+        },
+        {
+          label: pdf2docText('截取PDF页范围', 'Extract PDF page range'),
+          title: pdf2docText(
+            '截取当前 PDF 的指定页范围并保存为新 PDF（不计费）',
+            'Extract a page range from the current PDF and save as a new PDF (free).'
+          ),
+          onClick: async () => {
+            let loadingId = null
+            try {
+              const cfg = await loadConfig(context)
+              if (!hasAnyApiToken(cfg)) {
+                context.ui.notice(
+                  pdf2docText('请先在插件设置中配置密钥', 'Please configure the PDF2Doc token in plugin settings first'),
+                  'err'
+                )
+                return
+              }
+
+              if (
+                !context ||
+                !context.http ||
+                typeof context.http.fetch !== 'function' ||
+                typeof context.getCurrentFilePath !== 'function' ||
+                typeof context.readFileBinary !== 'function' ||
+                typeof context.saveBinaryToCurrentFolder !== 'function'
+              ) {
+                context.ui.notice(
+                  pdf2docText('当前版本不支持截取页范围', 'This version does not support extracting page ranges'),
+                  'err'
+                )
+                return
+              }
+
+              // 刻意保持与 “To MD” 一致：只处理“当前打开的 PDF”。
+              const path = context.getCurrentFilePath()
+              // 这里必须匹配“.pdf”扩展名；别用 /\\.pdf/，那是匹配“\\pdf”这种鬼东西。
+              if (!path || !/\.pdf$/i.test(String(path))) {
+                context.ui.notice(
+                  pdf2docText('当前没有打开 PDF 文件', 'No PDF file is currently open'),
+                  'err'
+                )
+                return
+              }
+              const bytes = await context.readFileBinary(path)
+              const fileName = String(path).split(/[\\\\/]+/).pop() || 'document.pdf'
+
+              let pagesHint = null
+              if (typeof context.getPdfPageCount === 'function') {
+                try {
+                  let copy = bytes
+                  try {
+                    if (bytes instanceof ArrayBuffer) copy = bytes.slice(0)
+                    else if (bytes instanceof Uint8Array) copy = bytes.slice(0)
+                  } catch {}
+                  pagesHint = await context.getPdfPageCount(copy)
+                } catch {}
+              }
+
+              const picked = await showExtractRangeDialog(fileName, pagesHint)
+              if (!picked || !picked.confirmed) return
+
+              if (context.ui.showNotification) {
+                loadingId = context.ui.showNotification(
+                  pdf2docText(
+                    `正在截取 PDF 第 ${picked.from}-${picked.to} 页...`,
+                    `Extracting PDF pages ${picked.from}-${picked.to}...`
+                  ),
+                  { type: 'info', duration: 0 }
+                )
+              }
+
+              const info = await retryOnPdf2DocNetworkError(
+                () => requestExtractPdfRange(context, cfg, bytes, fileName, picked.from, picked.to),
+                { maxAttempts: 3, baseDelayMs: 800 }
+              )
+
+              const r = await context.http.fetch(info.url, { method: 'GET' })
+              if (!r || r.status < 200 || r.status >= 300) {
+                throw new Error(pdf2docText('下载截取结果失败', 'Failed to download extracted PDF'))
+              }
+              const buf = await r.arrayBuffer()
+              const outBytes = new Uint8Array(buf)
+
+              const outNameRaw = info.suggestedName || ('截取' + picked.from + '-' + picked.to + '-' + fileName)
+              const outName = String(outNameRaw).replace(/[\\\\/:*?\"<>|]+/g, '_').trim() || 'extracted.pdf'
+              const saved = await context.saveBinaryToCurrentFolder({
+                fileName: /\.pdf$/i.test(outName) ? outName : (outName + '.pdf'),
+                data: outBytes,
+                onConflict: 'renameAuto'
+              })
+              const savedPath = saved && saved.fullPath ? String(saved.fullPath) : ''
+
+              // 下载成功后清理服务器端临时文件（失败不影响用户本地结果）
+              try {
+                await cleanupExtractJob(context, cfg, info.job, info.cleanupUrl)
+              } catch {}
+
+              if (loadingId && context.ui.hideNotification) {
+                try { context.ui.hideNotification(loadingId) } catch {}
+                loadingId = null
+              }
+
+              if (savedPath && typeof context.openFileByPath === 'function') {
+                try { await context.openFileByPath(savedPath) } catch {}
+              }
+
+              context.ui.notice(
+                pdf2docText(
+                  '截取完成，已保存为：' + (savedPath || outName),
+                  'Extracted and saved as: ' + (savedPath || outName)
+                ),
+                'ok',
+                4000
+              )
+            } catch (err) {
+              if (loadingId && context.ui.hideNotification) {
+                try { context.ui.hideNotification(loadingId) } catch {}
+              }
+              context.ui.notice(
+                pdf2docText(
+                  '截取失败：' + (err && err.message ? err.message : String(err)),
+                  'Extract failed: ' + (err && err.message ? err.message : String(err))
+                ),
+                'err',
+                5000
               )
             }
           }

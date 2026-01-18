@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.2.2
+- Added: Plugin Ribbon (vertical toolbar) supports plugin buttons; Plugin Menu Manager now supports Ribbon visibility / position (Top/Bottom) / reorder
+- Added: Plugin APIs `context.addRibbonButton` / `context.showDropdownMenu`, plus plugin dev docs in `plugin.md`
+- Updated: Built-in “High-Accuracy PDF & Image Parsing (pdf2doc)” v0.2.4 (large-file split parsing + manual merge; resume; parse selected range; post-processing image progress, etc.)
+- Updated: AI Assistant plugin v0.4.5 (Ribbon toggle button)
+- Fixed/Compatibility: Improved macOS 12 compatibility (build target set to ES2020 to avoid blank window); fixed macOS/Linux standalone window config
+
 ## Update v1.2.1
 - Added: Built-in “High-Accuracy PDF & Image Parsing (pdf2doc)” plugin — parse PDF/images into Markdown/Docx with translation (handwriting/layout/formulas/tables supported)
 - Improved: Reading mode KaTeX rendering now uses time-slicing/idle rendering to avoid UI freezes on formula-heavy documents

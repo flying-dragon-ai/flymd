@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## 更新 v1.2.2
+- 新增：插件垂直菜单栏（Ribbon）支持插件按钮；插件管理支持“垂直菜单栏显示/位置（顶部/底部）/顺序调整”
+- 新增：插件 API `context.addRibbonButton` / `context.showDropdownMenu`，并补充插件开发文档 `plugin.md`
+- 更新：内置插件「PDF及图片高精度解析（pdf2doc）」v0.2.4（大文件分割解析与手动合并；支持续传；支持截取指定范围解析；后处理图片进度提示等）
+- 更新：AI 助手插件 v0.4.5（支持 Ribbon 按钮快速开关）
+- 修复/兼容：macOS 12 兼容性改进（构建目标调整为 ES2020，避免白屏）；修正 mac/Linux 独立窗口配置
+
 ## 更新 v1.2.1
 - 新增：内置插件「PDF及图片高精度解析（pdf2doc）」支持将 PDF/图片解析为 Markdown/Docx 并翻译（含手写/布局/公式/表格）
 - 优化：阅读模式 KaTeX 渲染改为时间切片/空闲渲染，避免大量公式文档导致 UI 假死

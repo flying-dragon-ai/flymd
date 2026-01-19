@@ -6,7 +6,6 @@ import { Store } from '@tauri-apps/plugin-store'
 import { getActiveLibraryRoot, getActiveLibraryId } from '../utils/library'
 import { readDir, stat, readFile, writeFile, mkdir, exists, open as openFileHandle, BaseDirectory, remove } from '@tauri-apps/plugin-fs'
 import { appLocalDataDir } from '@tauri-apps/api/path'
-import { openPath } from '@tauri-apps/plugin-opener'
 import { ask } from '@tauri-apps/plugin-dialog'
 import { t } from '../i18n'
 import { showConflictDialog, showLocalDeleteDialog, showRemoteDeleteDialog, showUploadMissingRemoteDialog } from '../dialog'
@@ -325,19 +324,331 @@ async function saveSyncMetadata(meta: SyncMetadata, profile: SyncProfileContext)
   }
 }
 
+const SYNC_LOG_FILENAME = 'flymd-sync.log'
+const DEFAULT_SYNC_LOG_RETENTION_DAYS = 7
+
+function clampInt(n: any, min: number, max: number, fallback: number): number {
+  const v = Math.floor(Number(n))
+  if (!Number.isFinite(v)) return fallback
+  if (v < min) return min
+  if (v > max) return max
+  return v
+}
+
+function formatSyncLogTimestamp(d: Date): string {
+  const pad2 = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+}
+
+function tryParseSyncLogLineTime(line: string): number {
+  const raw = String(line || '')
+  if (!raw) return 0
+
+  // 优先识别：YYYY-MM-DD HH:mm:ss
+  const head = raw.slice(0, 19)
+  const iso = /^(\d{4})-(\d{2})-(\d{2})\s(\d{2}):(\d{2}):(\d{2})$/.exec(head)
+  if (iso) {
+    const y = Number(iso[1])
+    const m = Number(iso[2])
+    const d = Number(iso[3])
+    const hh = Number(iso[4])
+    const mm = Number(iso[5])
+    const ss = Number(iso[6])
+    const t = new Date(y, m - 1, d, hh, mm, ss).getTime()
+    return Number.isFinite(t) ? t : 0
+  }
+
+  // 兼容旧格式：toLocaleString(undefined,{hour12:false})，常见形态：YYYY/M/D HH:mm:ss
+  // 这里只做最小解析：取前两个 token 作为日期和时间。
+  const parts = raw.trim().split(/\s+/)
+  if (parts.length >= 2) {
+    const datePart = parts[0]
+    const timePart = parts[1]
+    const dm = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/.exec(datePart)
+    const tm = /^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$/.exec(timePart)
+    if (dm && tm) {
+      const y = Number(dm[1])
+      const m = Number(dm[2])
+      const d = Number(dm[3])
+      const hh = Number(tm[1])
+      const mm = Number(tm[2])
+      const ss = tm[3] ? Number(tm[3]) : 0
+      const t = new Date(y, m - 1, d, hh, mm, ss).getTime()
+      return Number.isFinite(t) ? t : 0
+    }
+  }
+
+  return 0
+}
+
+async function readSyncLogText(): Promise<string> {
+  try {
+    const data = await readFile(SYNC_LOG_FILENAME as any, { baseDir: BaseDirectory.AppLocalData } as any)
+    return new TextDecoder().decode(data || new Uint8Array())
+  } catch {
+    return ''
+  }
+}
+
+async function writeSyncLogText(text: string): Promise<void> {
+  try {
+    const enc = new TextEncoder().encode(String(text || ''))
+    await writeFile(SYNC_LOG_FILENAME as any, enc as any, { baseDir: BaseDirectory.AppLocalData } as any)
+  } catch {}
+}
+
+async function pruneSyncLogByDays(days: number): Promise<void> {
+  const keepDays = clampInt(days, 1, 90, DEFAULT_SYNC_LOG_RETENTION_DAYS)
+  const threshold = Date.now() - keepDays * 24 * 60 * 60 * 1000
+  const text = await readSyncLogText()
+  if (!text.trim()) return
+
+  const lines = text.split('\n')
+  const kept: string[] = []
+  let keepFollowing = true
+
+  for (const line of lines) {
+    const t = tryParseSyncLogLineTime(line)
+    if (t > 0) {
+      keepFollowing = t >= threshold
+      if (keepFollowing) kept.push(line)
+      continue
+    }
+    // 无时间戳的行：只在上一条“被保留的日志”之后保留（兼容多行错误输出）
+    if (keepFollowing && line) kept.push(line)
+  }
+
+  const next = kept.join('\n').replace(/\n{3,}/g, '\n\n')
+  if (next.trim() === text.trim()) return
+  await writeSyncLogText(next ? (next.endsWith('\n') ? next : next + '\n') : '')
+}
+
+function escapeHtml(s: string): string {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+// 日志标签类型映射
+const LOG_TAG_TYPES: Record<string, string> = {
+  // 成功类
+  'ok': 'ok', 'done': 'ok', 'save-meta': 'ok', 'save-hint': 'ok', 'compare-done': 'ok',
+  'retry-ok': 'ok', 'hash-reuse': 'ok', 'infinity-success': 'ok',
+  'enc-meta][upload': 'ok', 'enc-meta][probe-ok': 'ok', 'enc-meta][adopt-remote': 'ok',
+  // 错误类
+  'error': 'error', 'fail': 'error', 'fatal': 'error',
+  'remote-scan-error': 'error', 'shutdown-error': 'error',
+  'local-deleted-dialog-error': 'error', 'local-deleted-dialog-fatal': 'error',
+  'local-deleted-error': 'error', 'remote-deleted-ask-error': 'error',
+  'safe-mode-error': 'error', 'infinity-failed': 'error',
+  'enc-meta][upload-fail': 'error', 'enc-meta][probe-fail': 'error',
+  'enc-meta][probe-head-fail': 'error', 'enc-meta][probe-bad': 'error',
+  'enc-meta][read-fail': 'error', 'enc-meta][mismatch': 'error',
+  'enc-meta][adopt-remote-fail': 'error', 'enc-meta][fatal': 'error',
+  // 警告类
+  'warn': 'warn', 'conflict': 'warn', 'conflict!': 'warn', 'timeout': 'warn',
+  'conflict-first-sync': 'warn', 'conflict-cancel': 'warn',
+  'conflict-auto': 'warn', 'conflict-resolve': 'warn', 'safe-mode-conflict': 'warn',
+  // 同步边界类
+  'sync-start': 'sync', 'sync-end': 'sync',
+  // 信息类
+  'compare': 'info', 'compare-detail': 'info', 'detect': 'info', 'prep': 'info',
+  'progress': 'info', 'hint': 'info', 'hint-skip': 'info', 'scan-skip-hidden': 'info',
+  'remote-propfind': 'info', 'propfind': 'info', 'propfind-cache-hit': 'info',
+  'propfind-infinity': 'info', 'propfind-infinity-skip': 'info',
+  'safe-mode': 'info', 'safe-mode-apply': 'info', 'safe-mode-skip': 'info',
+  'shutdown': 'info', 'retry': 'info', 'retry-wait': 'info',
+  'enc-meta][skip-upload': 'info', 'enc-meta][refuse-upload': 'info',
+  // 上传类
+  'upload': 'upload',
+  // 下载类
+  'download': 'download', 'recover': 'download',
+  // 删除类
+  'delete': 'delete', 'delete-local': 'delete', 'delete-remote': 'delete',
+  'local-deleted': 'delete', 'local-deleted-action': 'delete',
+  'remote-deleted-ask': 'delete', 'remote-deleted-ask-action': 'delete',
+  'infer-remote-deleted': 'delete',
+  // 跳过类
+  'skip': 'skip', 'skip-delete-local': 'skip', 'skip-delete-remote': 'skip',
+  'skip-remote': 'skip', 'keep-local': 'skip',
+  // 移动类
+  'move-remote': 'move', 'rename-detect': 'move',
+}
+
+// 解析并格式化单行日志
+function formatLogLine(line: string): string {
+  // 匹配格式: 时间戳 [标签] 内容
+  // 例如: 2026/1/18 13:51:58 [ok] download 小说/xxx.md
+  const match = line.match(/^(\d{4}\/\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}:\d{2})\s+\[([^\]]+)\]\s*(.*)$/)
+
+  if (!match) {
+    // 无法解析的行，直接返回转义后的内容
+    return escapeHtml(line)
+  }
+
+  const [, timestamp, tag, rest] = match
+  const tagType = LOG_TAG_TYPES[tag] || 'info'
+  const tagClass = `sync-log-tag sync-log-tag-${tagType}`
+
+  // 构建格式化的 HTML
+  return `<span class="sync-log-ts">${escapeHtml(timestamp)}</span> ` +
+         `<span class="${tagClass}">[${escapeHtml(tag)}]</span>` +
+         `<span class="sync-log-msg"> ${escapeHtml(rest)}</span>`
+}
+
+function renderSyncLogAsHtmlWithLatestHighlight(text: string): string {
+  const raw = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const trimmedRight = raw.replace(/\s+$/g, '')
+  if (!trimmedRight) {
+    return `<div class="sync-log-empty">${escapeHtml(t('sync.logViewer.empty') || '暂无日志')}</div>`
+  }
+
+  const lines = trimmedRight.split('\n')
+
+  const findLastSession = () => {
+    // 优先：找到最后一个 sync-end，再向上找最近的 sync-start（最后一次完整同步）
+    let endIdx = -1
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].includes('[sync-end]')) { endIdx = i; break }
+    }
+    if (endIdx >= 0) {
+      for (let i = endIdx; i >= 0; i--) {
+        if (lines[i].includes('[sync-start]')) return { start: i, end: endIdx }
+      }
+      return { start: endIdx, end: endIdx }
+    }
+
+    // 兜底：没有 sync-end，则高亮最后一个 sync-start 到末尾
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].includes('[sync-start]')) return { start: i, end: lines.length - 1 }
+    }
+
+    // 再兜底：只高亮最后一行
+    return { start: lines.length - 1, end: lines.length - 1 }
+  }
+
+  const sess = findLastSession()
+  let html = `<pre class="sync-log-pre">`
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const inSess = i >= sess.start && i <= sess.end
+    const cls = inSess ? 'sync-log-line sync-log-session' : 'sync-log-line'
+    const id = i === sess.end ? ' id="sync-log-session-end"' : ''
+    html += `<span class="${cls}"${id}>${formatLogLine(line)}\n</span>`
+  }
+  html += `</pre>`
+  return html
+}
+
+async function openSyncLogViewerDialog(): Promise<void> {
+  const overlayId = 'sync-log-overlay'
+  let overlay = document.getElementById(overlayId) as HTMLDivElement | null
+  if (!overlay) {
+    overlay = document.createElement('div')
+    overlay.id = overlayId
+    overlay.className = 'upl-overlay hidden sync-log-overlay'
+    overlay.innerHTML = `
+      <div class="upl-dialog sync-log-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-log-title">
+        <div class="upl-header">
+          <div id="sync-log-title">${t('sync.logViewer.title') || '同步日志'}</div>
+          <button id="sync-log-close" class="about-close" title="${t('about.close')}">×</button>
+        </div>
+        <div class="upl-body">
+          <div class="sync-log-retention-hint" id="sync-log-retention-hint"></div>
+          <div class="sync-log-body" id="sync-log-body"></div>
+          <div class="sync-log-toolbar sync-log-toolbar-bottom">
+            <button type="button" id="sync-log-clear" class="btn-secondary">${t('sync.logViewer.clear') || '清空'}</button>
+            <button type="button" id="sync-log-latest-btn" class="btn-primary">${t('sync.logViewer.latest') || '查看最新日志'}</button>
+          </div>
+        </div>
+      </div>
+    `
+    document.body.appendChild(overlay)
+  }
+
+  const show = (v: boolean) => {
+    if (!overlay) return
+    if (v) overlay.classList.remove('hidden')
+    else overlay.classList.add('hidden')
+  }
+
+  const btnClose = overlay.querySelector('#sync-log-close') as HTMLButtonElement | null
+  const btnClear = overlay.querySelector('#sync-log-clear') as HTMLButtonElement | null
+  const btnLatest = overlay.querySelector('#sync-log-latest-btn') as HTMLButtonElement | null
+  const body = overlay.querySelector('#sync-log-body') as HTMLDivElement | null
+  const retentionHint = overlay.querySelector('#sync-log-retention-hint') as HTMLDivElement | null
+
+  const loadAndRender = async (scrollToLatest: boolean) => {
+    try {
+      const cfg = await getWebdavSyncConfig()
+      const days = clampInt((cfg as any)?.logRetentionDays, 1, 90, DEFAULT_SYNC_LOG_RETENTION_DAYS)
+      if (retentionHint) {
+        retentionHint.textContent = (t('sync.logRetention.hintView') || '日志保留 {days} 天').replace('{days}', String(days))
+      }
+      await pruneSyncLogByDays(days)
+      const text = await readSyncLogText()
+      if (body) body.innerHTML = renderSyncLogAsHtmlWithLatestHighlight(text)
+
+      if (scrollToLatest) {
+        const el = document.getElementById('sync-log-session-end')
+        if (el) {
+          el.scrollIntoView({ block: 'center' })
+          // 闪一下整段同步（从 sync-start 到 sync-end）
+          const sessEls = overlay?.querySelectorAll('.sync-log-session') || []
+          sessEls.forEach((node: any) => { try { node.classList.remove('sync-log-flash') } catch {} })
+          void (el as any).offsetHeight
+          sessEls.forEach((node: any) => { try { node.classList.add('sync-log-flash') } catch {} })
+          setTimeout(() => {
+            try {
+              const nodes = overlay?.querySelectorAll('.sync-log-session') || []
+              nodes.forEach((node: any) => { try { node.classList.remove('sync-log-flash') } catch {} })
+            } catch {}
+          }, 1200)
+        }
+      }
+    } catch (e) {
+      if (body) body.innerHTML = `<div class="sync-log-empty">${escapeHtml((e as any)?.message || String(e || ''))}</div>`
+    }
+  }
+
+  const onCancel = () => show(false)
+
+  if (btnClose) btnClose.onclick = onCancel
+  overlay.onclick = (e: any) => { if (e && e.target === overlay) onCancel() }
+
+  if (btnClear) {
+    btnClear.onclick = async () => {
+      try {
+        const ok = await ask(t('sync.logViewer.clearConfirm') || '确定清空同步日志？')
+        if (!ok) return
+        await writeSyncLogText('')
+        await loadAndRender(false)
+      } catch {}
+    }
+  }
+
+  if (btnLatest) {
+    btnLatest.onclick = async () => { await loadAndRender(true) }
+  }
+
+  show(true)
+  await loadAndRender(true)
+}
+
 async function syncLog(msg: string): Promise<void> {
   try {
     const ts = new Date()
-    const localTs = (() => {
-      try { return ts.toLocaleString(undefined, { hour12: false }) } catch { return ts.toString() }
-    })()
+    const localTs = formatSyncLogTimestamp(ts)
     const enc = new TextEncoder().encode(localTs + ' ' + msg + '\n')
-    const logPath = 'flymd-sync.log'
+    const logPath = SYNC_LOG_FILENAME
     const logHandle = await openFileHandle(logPath as any, { read: true, write: true, append: true, create: true, baseDir: BaseDirectory.AppLocalData } as any)
     try {
       const STAT_THRESHOLD = 5 * 1024 * 1024 // 5MB
       try {
-        const statInfo = await stat(logPath as any)
+        const statInfo = await stat(logPath as any, { baseDir: BaseDirectory.AppLocalData } as any)
         if (statInfo && typeof statInfo.size === 'number' && statInfo.size > STAT_THRESHOLD) {
           // 先关闭句柄再截断（Windows 下需要重新打开为写模式）
           try { await (logHandle as any).close() } catch {}
@@ -389,9 +700,7 @@ async function withHttpRetry<T>(label: string, fn: (attempt: number) => Promise<
 }
 export async function openSyncLog(): Promise<void> {
   try {
-    const localDataDir = await appLocalDataDir()
-    const logPath = localDataDir + (localDataDir.includes('\\') ? '\\' : '/') + 'flymd-sync.log'
-    await openPath(logPath)
+    await openSyncLogViewerDialog()
   } catch (e) {
     console.warn('打开日志失败', e)
     alert('打开日志失败: ' + ((e as any)?.message || e))
@@ -492,6 +801,7 @@ export type WebdavSyncConfig = {
   onStartup: boolean
   onShutdown: boolean
   timeoutMs: number
+  logRetentionDays?: number
   includeGlobs: string[]
   excludeGlobs: string[]
   baseUrl: string
@@ -652,6 +962,7 @@ function buildWebdavConfigFromRaw(raw: any): WebdavSyncConfig {
     onStartup: raw?.onStartup === true,
     onShutdown: raw?.onShutdown === true,
     timeoutMs: Number(raw?.timeoutMs) > 0 ? Number(raw?.timeoutMs) : 120000,
+    logRetentionDays: clampInt(raw?.logRetentionDays, 1, 90, DEFAULT_SYNC_LOG_RETENTION_DAYS),
     includeGlobs: Array.isArray(raw?.includeGlobs) ? raw.includeGlobs : ['**/*.md', '**/*.{png,jpg,jpeg,gif,svg,pdf}'],
     excludeGlobs: Array.isArray(raw?.excludeGlobs) ? raw.excludeGlobs : ['**/.git/**','**/.trash/**','**/.DS_Store','**/Thumbs.db'],
     baseUrl: String(raw?.baseUrl || ''),
@@ -784,6 +1095,10 @@ export async function setWebdavSyncConfig(next: Partial<WebdavSyncConfig>): Prom
     ? profiles[libId]
     : {}
   const merged: any = { ...curRaw, ...next }
+
+  if ('logRetentionDays' in merged) {
+    merged.logRetentionDays = clampInt(merged.logRetentionDays, 1, 90, DEFAULT_SYNC_LOG_RETENTION_DAYS)
+  }
 
   // 若开启加密且已有密钥但尚无盐值，则生成一个固定盐值（每个配置唯一）
   try {
@@ -1659,6 +1974,9 @@ export async function syncNow(reason: SyncReason): Promise<{ uploaded: number; d
     console.log('[WebDAV Sync] 开始同步, reason:', reason)
 
     let cfg = await getWebdavSyncConfig()
+    try {
+      await pruneSyncLogByDays(clampInt((cfg as any)?.logRetentionDays, 1, 90, DEFAULT_SYNC_LOG_RETENTION_DAYS))
+    } catch {}
     const httpWhitelist = normalizeHttpWhitelist(cfg.allowedHttpHosts)
     if (!cfg.enabled) {
       await syncLog('[skip] 同步未启用')
@@ -2736,6 +3054,12 @@ export async function openWebdavSyncDialog(): Promise<void> {
               <div class="upl-hint">${t('sync.smartSkip.hint')}</div>
             </div>
 
+            <label for="sync-log-retention-days">${t('sync.logRetention.label') || '日志保留(天)'}</label>
+            <div class="upl-field">
+              <input id="sync-log-retention-days" type="number" min="1" step="1" placeholder="${String(DEFAULT_SYNC_LOG_RETENTION_DAYS)}"/>
+              <div class="upl-hint">${t('sync.logRetention.hint') || ''}</div>
+            </div>
+
             <div class="upl-section-title">${t('sync.server')}</div>
             <label for="sync-baseurl">Base URL</label>
             <div class="upl-field">
@@ -2785,6 +3109,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
   const elLocalDeleteStrategy = overlay.querySelector('#sync-local-delete-strategy') as HTMLSelectElement
   const elConfirmDeleteRemote = overlay.querySelector('#sync-confirm-delete-remote') as HTMLInputElement
   const elSkipMinutes = overlay.querySelector('#sync-skip-minutes') as HTMLInputElement
+  const elLogRetentionDays = overlay.querySelector('#sync-log-retention-days') as HTMLInputElement
   const elBase = overlay.querySelector('#sync-baseurl') as HTMLInputElement
   const elRoot = overlay.querySelector('#sync-root') as HTMLInputElement
   const elUser = overlay.querySelector('#sync-user') as HTMLInputElement
@@ -2808,6 +3133,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
   elLocalDeleteStrategy.value = cfg.localDeleteStrategy || 'auto'
   elConfirmDeleteRemote.checked = cfg.confirmDeleteRemote !== false
   elSkipMinutes.value = String(cfg.skipRemoteScanMinutes !== undefined ? cfg.skipRemoteScanMinutes : 5)
+  elLogRetentionDays.value = String(clampInt((cfg as any)?.logRetentionDays, 1, 90, DEFAULT_SYNC_LOG_RETENTION_DAYS))
   elBase.value = cfg.baseUrl || ''
   elRoot.value = cfg.rootPath || '/flymd'
   elUser.value = cfg.username || ''
@@ -2954,6 +3280,7 @@ export async function openWebdavSyncDialog(): Promise<void> {
         onStartup: elOnStartup.checked,
         onShutdown: elOnShutdown.checked,
         timeoutMs: Math.max(1000, Number(elTimeout.value) || 120000),
+        logRetentionDays: clampInt(elLogRetentionDays.value, 1, 90, DEFAULT_SYNC_LOG_RETENTION_DAYS),
         conflictStrategy: elConflictStrategy.value as 'ask' | 'newest' | 'last-wins',
         localDeleteStrategy: elLocalDeleteStrategy.value as 'ask' | 'auto' | 'keep',
         confirmDeleteRemote: elConfirmDeleteRemote.checked,
@@ -2967,6 +3294,9 @@ export async function openWebdavSyncDialog(): Promise<void> {
         encryptEnabled: elEncryptEnabled.checked,
         encryptKey: elEncryptKey.value.trim(),
       })
+      try {
+        await pruneSyncLogByDays(clampInt(elLogRetentionDays.value, 1, 90, DEFAULT_SYNC_LOG_RETENTION_DAYS))
+      } catch {}
       // 反馈
       try { const el = document.getElementById('status'); if (el) { el.textContent = t('sync.saved'); setTimeout(() => { try { el.textContent = '' } catch {} }, 1200) } } catch {}
       show(false)

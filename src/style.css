@@ -5358,6 +5358,236 @@ body::-webkit-scrollbar:horizontal,
   opacity: 0.85;
 }
 
+/* WebDAV 同步日志查看器 */
+.sync-log-dialog {
+  width: min(1120px, 96vw);
+  max-width: 1120px;
+  height: min(860px, 92vh);
+  display: flex;
+  flex-direction: column;
+}
+
+.sync-log-dialog .upl-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.sync-log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sync-log-toolbar-bottom {
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+
+.sync-log-retention-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.sync-log-body {
+  margin-top: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: rgba(127,127,127,0.05);
+  border: 1px solid rgba(127,127,127,0.18);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.sync-log-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sync-log-line {
+  display: inline;
+}
+
+.sync-log-empty {
+  font-size: 13px;
+  opacity: 0.75;
+  padding: 12px 8px;
+}
+
+.sync-log-session {
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.sync-log-session.sync-log-flash {
+  background: rgba(245, 158, 11, 0.22);
+}
+
+/* ========== 同步日志类型高亮 ========== */
+
+/* 日志行改为 block 以便完整行着色 */
+.sync-log-line {
+  display: block;
+  padding: 1px 0;
+}
+
+/* 时间戳样式：淡化处理 */
+.sync-log-ts {
+  color: #6b7280;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* 日志标签通用样式：圆角胶囊 */
+.sync-log-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  margin: 0 4px;
+  font-family: inherit;
+}
+
+/* 成功类：绿色 */
+.sync-log-tag-ok {
+  background: rgba(16, 185, 129, 0.15);
+  color: #059669;
+}
+
+/* 错误类：红色 */
+.sync-log-tag-error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+}
+
+/* 警告类：橙色 */
+.sync-log-tag-warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #d97706;
+}
+
+/* 开始/结束类：蓝色 */
+.sync-log-tag-sync {
+  background: rgba(59, 130, 246, 0.15);
+  color: #2563eb;
+}
+
+/* 信息类：灰蓝色 */
+.sync-log-tag-info {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+}
+
+/* 上传类：紫色 */
+.sync-log-tag-upload {
+  background: rgba(139, 92, 246, 0.15);
+  color: #7c3aed;
+}
+
+/* 下载类：青色 */
+.sync-log-tag-download {
+  background: rgba(6, 182, 212, 0.15);
+  color: #0891b2;
+}
+
+/* 删除类：粉红色 */
+.sync-log-tag-delete {
+  background: rgba(236, 72, 153, 0.15);
+  color: #db2777;
+}
+
+/* 跳过类：中性灰 */
+.sync-log-tag-skip {
+  background: rgba(156, 163, 175, 0.15);
+  color: #6b7280;
+}
+
+/* 移动类：靛蓝色 */
+.sync-log-tag-move {
+  background: rgba(99, 102, 241, 0.15);
+  color: #4f46e5;
+}
+
+/* 日志消息内容 */
+.sync-log-msg {
+  color: inherit;
+  opacity: 0.9;
+}
+
+/* 深色模式适配 */
+.dark .sync-log-ts,
+[data-theme="dark"] .sync-log-ts {
+  color: #9ca3af;
+}
+
+.dark .sync-log-tag-ok,
+[data-theme="dark"] .sync-log-tag-ok {
+  background: rgba(52, 211, 153, 0.2);
+  color: #34d399;
+}
+
+.dark .sync-log-tag-error,
+[data-theme="dark"] .sync-log-tag-error {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+
+.dark .sync-log-tag-warn,
+[data-theme="dark"] .sync-log-tag-warn {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}
+
+.dark .sync-log-tag-sync,
+[data-theme="dark"] .sync-log-tag-sync {
+  background: rgba(96, 165, 250, 0.2);
+  color: #60a5fa;
+}
+
+.dark .sync-log-tag-info,
+[data-theme="dark"] .sync-log-tag-info {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+}
+
+.dark .sync-log-tag-upload,
+[data-theme="dark"] .sync-log-tag-upload {
+  background: rgba(167, 139, 250, 0.2);
+  color: #a78bfa;
+}
+
+.dark .sync-log-tag-download,
+[data-theme="dark"] .sync-log-tag-download {
+  background: rgba(34, 211, 238, 0.2);
+  color: #22d3ee;
+}
+
+.dark .sync-log-tag-delete,
+[data-theme="dark"] .sync-log-tag-delete {
+  background: rgba(244, 114, 182, 0.2);
+  color: #f472b6;
+}
+
+.dark .sync-log-tag-skip,
+[data-theme="dark"] .sync-log-tag-skip {
+  background: rgba(209, 213, 219, 0.12);
+  color: #d1d5db;
+}
+
+.dark .sync-log-tag-move,
+[data-theme="dark"] .sync-log-tag-move {
+  background: rgba(129, 140, 248, 0.2);
+  color: #818cf8;
+}
+
 /* === 打印样式 - 确保打印整个文档而不仅是可视范围 === */
 @media print {
   /* 隐藏所有UI元素 */

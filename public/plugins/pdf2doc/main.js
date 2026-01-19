@@ -261,6 +261,8 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
     const canMoveToLibrary = !!(opt && opt.canMoveToLibrary)
     const requireSplit = !!(opt && opt.requireSplit)
     const canSplit = !!(opt && opt.canSplit)
+    const enableAutoMergeAfterBatch = !!(opt && opt.enableAutoMergeAfterBatch)
+    const defaultAutoMergeAfterBatch = !!(opt && opt.defaultAutoMergeAfterBatch)
 
     const overlay = document.createElement('div')
     overlay.style.cssText =
@@ -316,6 +318,27 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
         (warnText ? `<br><span style="color:#dc2626;font-weight:600;">${warnText}</span>` : '')
     )
     body.appendChild(msg)
+
+    let autoMergeAfterBatch = defaultAutoMergeAfterBatch
+    if (enableAutoMergeAfterBatch) {
+      const row = document.createElement('label')
+      row.style.cssText =
+        'display:flex;align-items:flex-start;gap:10px;margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid var(--border,#e5e7eb);background:rgba(127,127,127,.04);cursor:pointer;user-select:none;'
+      const cb = document.createElement('input')
+      cb.type = 'checkbox'
+      cb.checked = !!autoMergeAfterBatch
+      cb.style.cssText = 'margin-top:2px;'
+      cb.onchange = () => { autoMergeAfterBatch = !!cb.checked }
+      const text = document.createElement('div')
+      text.style.cssText = 'font-size:12px;line-height:1.6;'
+      text.innerHTML = pdf2docText(
+        '批量解析完成后<strong>自动合并</strong>分割片段结果（生成“合并-xxx.md”）',
+        'Auto-merge split parts after batch parsing (generate “合并-xxx.md”)'
+      )
+      row.appendChild(cb)
+      row.appendChild(text)
+      body.appendChild(row)
+    }
 
     if (requireSplit) {
       const tip = document.createElement('div')
@@ -373,7 +396,7 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
       try {
         document.body.removeChild(overlay)
       } catch {}
-      resolve({ action })
+      resolve({ action, autoMergeAfterBatch: !!autoMergeAfterBatch })
     }
 
     btnCancel.onclick = () => done('cancel')
@@ -871,6 +894,63 @@ async function writeTextFileRenameAuto(context, absPath, content) {
   throw new Error(pdf2docText('文件名冲突过多', 'Too many file name conflicts'))
 }
 
+async function mergeSegmentedResultsInDir(context, fileDirAbs, relDir, opt) {
+  const allowEmpty = !!(opt && opt.allowEmpty)
+  if (
+    !context ||
+    typeof context.listLibraryFiles !== 'function' ||
+    typeof context.readFileBinary !== 'function'
+  ) {
+    throw new Error(pdf2docText('当前版本不支持合并', 'Merge is not supported in this version'))
+  }
+  if (!fileDirAbs || !relDir) {
+    throw new Error(pdf2docText('无法确定当前文件夹', 'Failed to determine the folder'))
+  }
+
+  const files = await context.listLibraryFiles({
+    extensions: ['md', 'markdown'],
+    maxDepth: 12,
+    includeDirs: [relDir.endsWith('/') ? relDir : (relDir + '/')]
+  })
+
+  const parts = (Array.isArray(files) ? files : [])
+    .filter(it => it && typeof it.relative === 'string' && typeof it.path === 'string')
+    .filter(it => {
+      const rr = String(it.relative || '')
+      const dir = rr.split('/').slice(0, -1).join('/')
+      if (dir !== relDir) return false
+      const name = rr.split('/').pop() || ''
+      return /^(?:解析)?分割片段\d{3,4}-.*\.(md|markdown)$/i.test(name)
+    })
+    .map(it => {
+      const name = String(it.relative || '').split('/').pop() || ''
+      const m = name.match(/^(?:解析)?分割片段(\d{3,4})-/i)
+      const idx = m ? parseInt(m[1], 10) || 0 : 0
+      return { idx, path: String(it.path), name }
+    })
+    .sort((a, b) => a.idx - b.idx)
+
+  if (!parts.length) {
+    if (allowEmpty) return ''
+    throw new Error(pdf2docText('当前文件夹未找到分割片段的解析结果（.md）', 'No parsed markdown files found'))
+  }
+
+  const decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8') : null
+  const mergedChunks = []
+  for (const p of parts) {
+    const bytes = await context.readFileBinary(p.path)
+    const text = decoder ? decoder.decode(bytes) : String(bytes || '')
+    mergedChunks.push(text)
+  }
+
+  const merged = mergedChunks.join('\n\n---\n\n')
+  const folderName = String(fileDirAbs).replace(/\\/g, '/').split('/').filter(Boolean).pop() || '合并结果'
+  const outName = '合并-' + getSafeBaseNameForFile(folderName, '合并结果') + '.md'
+  const outAbs = joinPath(fileDirAbs, outName)
+  const savedPath = await writeTextFileRenameAuto(context, outAbs, merged)
+  return savedPath
+}
+
 async function splitPdfIntoLibraryFolder(context, cfg, pdfBytes, sourcePathOrName, opt) {
   if (!context || typeof context.saveBinaryToCurrentFolder !== 'function') {
     throw new Error(pdf2docText('当前版本不支持保存文件', 'Saving files is not supported in this version'))
@@ -987,10 +1067,13 @@ async function copyPdfIntoLibraryAndOpen(context, pdfBytes, sourcePath) {
   return fullPath
 }
 
-async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint, pdfPath) {
+async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint, pdfPath, opt) {
   // 这是“用户明确要求每次都弹一次”的确认框：即使查询失败也要尽量弹（弹不出来才放行）。
   const canShow = typeof document !== 'undefined'
-  if (!canShow) return true
+  const wantDetail = !!(opt && opt.returnDetail)
+  if (!canShow) {
+    return wantDetail ? { ok: true, autoMergeAfterBatch: false } : true
+  }
 
   let pdfPages = null
   const hint = typeof pdfPagesHint === 'number' ? pdfPagesHint : NaN
@@ -1083,12 +1166,15 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint,
       requireLibrary,
       canMoveToLibrary,
       requireSplit,
-      canSplit
+      canSplit,
+      enableAutoMergeAfterBatch: !!(opt && opt.enableAutoMergeAfterBatch),
+      defaultAutoMergeAfterBatch: !!(opt && opt.defaultAutoMergeAfterBatch)
     })
     const action = ret && ret.action ? ret.action : 'cancel'
+    const autoMergeAfterBatch = !!(ret && ret.autoMergeAfterBatch)
     if (action === 'recharge') {
       try { await openSettings(context) } catch {}
-      return false
+      return wantDetail ? { ok: false, autoMergeAfterBatch: false } : false
     }
     if (action === 'move') {
       try {
@@ -1110,7 +1196,7 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint,
           )
         }
       }
-      return false
+      return wantDetail ? { ok: false, autoMergeAfterBatch: false } : false
     }
     if (action === 'split') {
       let overlay = null
@@ -1148,13 +1234,15 @@ async function confirmQuotaRiskBeforeParse(context, cfg, pdfBytes, pdfPagesHint,
           )
         }
       }
-      return false
+      return wantDetail ? { ok: false, autoMergeAfterBatch: false } : false
     }
-    if (action === 'cancel') return false
-    return true
+    if (action === 'cancel') {
+      return wantDetail ? { ok: false, autoMergeAfterBatch: false } : false
+    }
+    return wantDetail ? { ok: true, autoMergeAfterBatch } : true
   } catch {
     // UI 弹窗失败不应阻断主流程
-    return true
+    return wantDetail ? { ok: true, autoMergeAfterBatch: false } : true
   }
 }
 
@@ -3515,6 +3603,7 @@ export async function activate(context) {
           let loadingId = null
           let parseOverlay = null
           let cancelSource = null
+          let autoMergeAfterBatch = false
           try {
             const cfg = await loadConfig(context)
             if (!hasAnyApiToken(cfg)) {
@@ -3622,7 +3711,13 @@ export async function activate(context) {
             // 解析前额度风险提示：只提示一次，避免批量弹窗
             try {
               const firstBytes = await context.readFileBinary(parts[0].path)
-              const ok = await confirmQuotaRiskBeforeParse(context, cfg, firstBytes, null, parts[0].path)
+              const ret = await confirmQuotaRiskBeforeParse(context, cfg, firstBytes, null, parts[0].path, {
+                returnDetail: true,
+                enableAutoMergeAfterBatch: true,
+                defaultAutoMergeAfterBatch: false
+              })
+              const ok = ret && typeof ret === 'object' ? !!ret.ok : !!ret
+              autoMergeAfterBatch = !!(ret && typeof ret === 'object' && ret.autoMergeAfterBatch)
               if (!ok) return
             } catch {}
 
@@ -3721,10 +3816,43 @@ export async function activate(context) {
               parseOverlay.close()
               parseOverlay = null
             }
+
+            let mergedPath = ''
+            if (autoMergeAfterBatch) {
+              let mergeLoadingId = null
+              try {
+                if (context.ui.showNotification) {
+                  mergeLoadingId = context.ui.showNotification(
+                    pdf2docText('正在自动合并分割片段结果...', 'Auto-merging split parts...'),
+                    { type: 'info', duration: 0 }
+                  )
+                }
+                mergedPath = await mergeSegmentedResultsInDir(context, fileDirAbs, relDir, { allowEmpty: true })
+              } catch (e) {
+                const msg = e && e.message ? String(e.message) : String(e || '')
+                context.ui.notice(
+                  pdf2docText('自动合并失败：' + msg, 'Auto-merge failed: ' + msg),
+                  'err',
+                  5000
+                )
+              } finally {
+                if (mergeLoadingId && context.ui.hideNotification) {
+                  try { context.ui.hideNotification(mergeLoadingId) } catch {}
+                }
+              }
+              if (mergedPath && typeof context.openFileByPath === 'function') {
+                try { await context.openFileByPath(mergedPath) } catch {}
+              }
+            }
+
             context.ui.notice(
               pdf2docText(
-                '批量解析完成，可通过菜单“🧩 分段解析结果合并”生成合并结果',
-                'Batch parsing finished. Use “🧩 Merge segmented results”.'
+                mergedPath
+                  ? '批量解析完成，已自动合并分割片段结果'
+                  : '批量解析完成，可通过菜单“🧩 分段解析结果合并”生成合并结果',
+                mergedPath
+                  ? 'Batch parsing finished. Split parts were auto-merged.'
+                  : 'Batch parsing finished. Use “🧩 Merge segmented results”.'
               ),
               'ok',
               4000

@@ -3,7 +3,7 @@
 
 import { history } from '@milkdown/plugin-history'
 import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx, editorViewCtx, commandsCtx, remarkStringifyOptionsCtx } from '@milkdown/core'
-import { TextSelection } from '@milkdown/prose/state'
+import { TextSelection, type Command } from '@milkdown/prose/state'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { readFile } from '@tauri-apps/plugin-fs'
 // 用于外部（main.ts）在所见模式下插入 Markdown（文件拖放时复用普通模式逻辑）
@@ -24,6 +24,7 @@ import { htmlMediaPlugin } from './plugins/htmlMedia'
 import { maybeConvertHtmlTableBlocksToGfm } from './plugins/htmlTable'
 import { remarkMathPlugin, katexOptionsCtx, mathInlineSchema, mathBlockSchema, mathInlineInputRule, mathBlockInputRule } from '@milkdown/plugin-math'
 import { liftListItem, sinkListItem } from 'prosemirror-schema-list'
+import { deleteColumn, deleteRow } from 'prosemirror-tables'
 // 注：保留 automd 插件以提供编辑功能，通过 CSS 隐藏其 UI 组件
 // 引入富文本所见视图的必要样式（避免工具条/布局错乱导致不可编辑/不可滚动）
 // 注：不直接导入 @milkdown/crepe/style.css，避免 Vite 对未导出的样式路径解析失败。
@@ -106,6 +107,46 @@ function deleteWysiwygNodeByDom(el: HTMLElement | null, typeNames: string[]): vo
       }
     })
   } catch {}
+}
+
+function runWysiwygTableCommandByDom(target: HTMLElement | null, cmd: Command): boolean {
+  try {
+    const view = _getView()
+    if (!view) return false
+    const cell = target?.closest?.('td,th') as HTMLElement | null
+    if (!cell) return false
+
+    const state = view.state
+    let pos = 0
+    try {
+      pos = view.posAtDOM(cell, 0)
+    } catch {
+      return false
+    }
+
+    const tr0 = state.tr.setSelection(TextSelection.near(state.doc.resolve(pos))) as any
+    const st0 = state.apply(tr0)
+
+    let nextTr: any | null = null
+    const ok = cmd(st0 as any, (tr: any) => { nextTr = tr }, view)
+    if (!ok || !nextTr) return false
+
+    try { nextTr = nextTr.scrollIntoView() } catch {}
+    view.dispatch(nextTr)
+    try { view.focus() } catch {}
+    return true
+  } catch {
+    return false
+  }
+}
+
+// 所见模式：表格右键操作（基于当前右键命中的单元格）
+export function wysiwygV2DeleteTableRow(target: HTMLElement | null): boolean {
+  return runWysiwygTableCommandByDom(target, deleteRow as any)
+}
+
+export function wysiwygV2DeleteTableColumn(target: HTMLElement | null): boolean {
+  return runWysiwygTableCommandByDom(target, deleteColumn as any)
 }
 
 function toLocalAbsFromSrc(src: string): string | null {

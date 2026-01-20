@@ -16,7 +16,7 @@ import { getPasteUrlTitleFetchEnabled } from './core/pasteUrlTitle'
 import type MarkdownIt from 'markdown-it'
 import type { LocalePref } from './i18n'
 // WYSIWYG: 锚点插件与锚点同步（用于替换纯比例同步）
-import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2GetSelectedText, wysiwygV2FindNext, wysiwygV2FindPrev, wysiwygV2ReplaceOne as wysiwygV2ReplaceOneSel, wysiwygV2ReplaceAllInDoc, wysiwygV2ReplaceAll, wysiwygV2HandleListTab } from './wysiwyg/v2/index'
+import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2GetSelectedText, wysiwygV2FindNext, wysiwygV2FindPrev, wysiwygV2ReplaceOne as wysiwygV2ReplaceOneSel, wysiwygV2ReplaceAllInDoc, wysiwygV2ReplaceAll, wysiwygV2HandleListTab, wysiwygV2DeleteTableRow, wysiwygV2DeleteTableColumn } from './wysiwyg/v2/index'
 import { setWysiwygPreload } from './wysiwyg/v2/silentTransition'
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
@@ -1180,6 +1180,32 @@ async function buildBuiltinContextMenuItems(ctx: ContextMenuContext): Promise<Co
           await uploadImageFromContextMenu(c)
         },
       })
+    }
+  } catch {}
+
+  // 所见模式：表格右键菜单（删除行/列）
+  try {
+    if (ctx.mode === 'wysiwyg') {
+      const target = ctx.targetElement as HTMLElement | undefined | null
+      const cell = target?.closest?.('td,th') as HTMLElement | null
+      if (cell) {
+        items.push({
+          label: t('ctx.table.deleteRow') || '删除行',
+          icon: '🗑️',
+          tooltip: '删除当前单元格所在行',
+          onClick: (c) => {
+            try { wysiwygV2DeleteTableRow((c.targetElement as any) || null) } catch {}
+          },
+        })
+        items.push({
+          label: t('ctx.table.deleteColumn') || '删除列',
+          icon: '🗑️',
+          tooltip: '删除当前单元格所在列',
+          onClick: (c) => {
+            try { wysiwygV2DeleteTableColumn((c.targetElement as any) || null) } catch {}
+          },
+        })
+      }
     }
   } catch {}
   return items

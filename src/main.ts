@@ -8601,8 +8601,47 @@ function bindEvents() {
       setTimeout(() => { (t as HTMLButtonElement).textContent = '复制' }, 1200)
     }
   }, { capture: true })
+
+  // 阅读模式：Ctrl/Cmd+A 只选择正文，避免把库名/侧栏/标题栏一起选中
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    try {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return
+      if ((e.key || '').toLowerCase() !== 'a') return
+      if (typeof mode === 'undefined' || mode !== 'preview') return
+
+      const active = document.activeElement as HTMLElement | null
+      if (active) {
+        const tag = (active.tagName || '').toUpperCase()
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return
+        // contenteditable 或 ProseMirror 等富文本输入，不抢系统全选行为
+        if ((active as any).isContentEditable) return
+        try { if (active.closest && active.closest('[contenteditable="true"]')) return } catch {}
+      }
+
+      const previewEl = document.getElementById('preview') as HTMLElement | null
+      if (!previewEl || previewEl.classList.contains('hidden')) return
+
+      // PDF 预览时不抢（通常在 iframe 内处理）
+      const mdHost = previewEl.querySelector('#preview-md-host') as HTMLElement | null
+      if (mdHost && mdHost.style.display === 'none') return
+
+      const bodyEl = previewEl.querySelector('.preview-body') as HTMLElement | null
+      if (!bodyEl) return
+
+      const sel = window.getSelection()
+      if (!sel) return
+      const r = document.createRange()
+      r.selectNodeContents(bodyEl)
+      sel.removeAllRanges()
+      sel.addRange(r)
+
+      e.preventDefault()
+      try { e.stopPropagation() } catch {}
+      try { (e as any).stopImmediatePropagation && (e as any).stopImmediatePropagation() } catch {}
+    } catch {}
+  }, true)
   // 库重命名/删除快捷键
-  
+
   // 快捷键：插入链接、重命名、删除（库树）
   document.addEventListener('keydown', guard(async (e: KeyboardEvent) => {
     // 开发模式：F12 / Ctrl+Shift+I 打开 DevTools（不影响生产）

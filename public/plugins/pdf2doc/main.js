@@ -6,7 +6,7 @@ const DEFAULT_API_BASE = 'https://flymd.llingfei.com/pdf/'
 const PDF2DOC_COMPAT_VERSION = '1.2.0'
 const PDF2DOC_STYLE_ID = 'pdf2doc-settings-style'
 const PDF2DOC_PROGRESS_Z_INDEX = 90020
-const PDF2DOC_SPLIT_THRESHOLD_PAGES = 300
+const PDF2DOC_SPLIT_THRESHOLD_PAGES = 500
 
 // 轻量多语言：跟随宿主（flymd.locale），默认用系统语言
 const PDF2DOC_LOCALE_LS_KEY = 'flymd.locale'
@@ -357,8 +357,8 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
     splitTip.style.cssText =
       'display:none;margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #f59e0b;background:rgba(245,158,11,.08);color:var(--fg,#333);font-size:12px;line-height:1.6;'
     splitTip.innerHTML = pdf2docText(
-      '当前 PDF 过大，需分割。分割文档会新建文件名文件夹，可通过“📁 同文件夹批量解析”进行解析，解析完成后可通过“🧩 分段解析结果合并”进行合并。',
-      'This PDF is too large and must be split. A folder will be created; use “Parse all PDFs in this folder”, then use “Merge split parts”.'
+      '当前PDF过大，需分割。分割后点击分割文件夹下的任意分割片段，通过“同文件夹批量解析”进行解析，解析完成自动合并。如合并失败可打开任意解析结果进行“分段解析结果合并”。',
+      'This PDF is too large and must be split. After splitting, open any split part in the split folder and run “Batch parse (folder)”. Results will be merged automatically; if it fails, open any parsed result and run “Merge segmented results”.'
     )
     body.appendChild(splitTip)
 
@@ -403,7 +403,7 @@ function showQuotaRiskDialog(context, pdfPages, remainPages, opt) {
     btnSplit.type = 'button'
     btnSplit.style.cssText =
       'padding:6px 12px;border-radius:8px;border:1px solid #f59e0b;background:#fff;color:#b45309;cursor:pointer;font-size:12px;'
-    btnSplit.textContent = pdf2docText('分割并打开文件夹', 'Split and open folder')
+    btnSplit.textContent = pdf2docText('进行自动分割', 'Auto split')
 
     const setContinueEnabled = (enabled) => {
       const ok = !!enabled
@@ -4046,11 +4046,11 @@ export async function activate(context) {
             // 解析前额度风险提示：只提示一次，避免批量弹窗
             try {
               const firstBytes = await context.readFileBinary(parts[0].path)
-              const ret = await confirmQuotaRiskBeforeParse(context, cfg, firstBytes, null, parts[0].path, {
-                returnDetail: true,
-                enableAutoMergeAfterBatch: true,
-                defaultAutoMergeAfterBatch: false
-              })
+                const ret = await confirmQuotaRiskBeforeParse(context, cfg, firstBytes, null, parts[0].path, {
+                  returnDetail: true,
+                  enableAutoMergeAfterBatch: true,
+                  defaultAutoMergeAfterBatch: true
+                })
               const ok = ret && typeof ret === 'object' ? !!ret.ok : !!ret
               autoMergeAfterBatch = !!(ret && typeof ret === 'object' && ret.autoMergeAfterBatch)
               if (!ok) return

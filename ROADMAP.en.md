@@ -2,6 +2,12 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.2.6
+- Fixed: On Windows, transparent windows could occasionally show a top “white bar/ghosting” after dragging / focus changes / display-scale changes (also covers Sticky Note window)
+- Improved: Sticky Note mode now autosaves on every change (debounced + serialized writes); forces a flush on blur and before switching back to preview, reducing the chance of losing edits
+- Improved: Sticky Note mode hides bottom-right notifications/width bubble to reduce distractions; Sticky Note tooltips now wrap to avoid overflow
+- Updated: Built-in “PDF & Image High-Precision Parsing (pdf2doc)” v0.2.8 (split threshold raised to 500 pages; refined split guidance and default auto-merge behavior)
+
 ## Update v1.2.5
 - Added: PDF export progress overlay (stages/progress/elapsed/logs) with one-click cancel
 - Fixed: Occasional blank/black pages when exporting very long documents (paged rendering avoids a giant canvas)

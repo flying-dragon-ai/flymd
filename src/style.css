@@ -163,7 +163,8 @@ body.platform-windows {
 }
 /* Windows 透明窗口拖动后偶发的“顶部白条/残影”兜底：轻微改变背景触发合成层刷新 */
 body.platform-windows.win-compositor-poke {
-  background: rgba(0, 0, 0, 0.008);
+  /* sticky-note-mode 使用了 background: transparent !important，这里必须用 !important 才能覆盖并触发合成刷新 */
+  background: rgba(0, 0, 0, 0.008) !important;
 }
 body.platform-windows #app {
   /* 阴影必须“收敛”到 padding 里，否则就是被裁剪或者被迫加大透明边 */
@@ -7976,6 +7977,12 @@ body.sticky-note-mode .preview-body blockquote {
 /* 便签模式：移除根元素背景，实现真正透明 */
 body.sticky-note-mode {
   background: transparent !important;
+}
+
+/* Windows：便签模式也不要做“全透明 root”，否则 DWM 在某些重绘序列里会漏出顶部浅色条 */
+body.platform-windows.sticky-note-mode {
+  /* 取 >= 1/255 的 alpha，肉眼不可见，但能避免合成层用默认色填充 */
+  background: rgba(0, 0, 0, 0.004) !important;
 }
 
 /* 便签模式：内容区域半透明背景 */

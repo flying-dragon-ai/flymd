@@ -6220,6 +6220,7 @@ function initWindowsCompositorPoke() {
   let settleTimer: any = null
   let settling = false
   let lastPokeAt = 0
+  let unfocusedTimer: any = null
 
   const pokeCssOnce = () => {
     try {
@@ -6252,6 +6253,24 @@ function initWindowsCompositorPoke() {
     setTimeout(() => { settling = false }, 200)
   }
 
+  const stopUnfocusedPoke = () => {
+    try { if (unfocusedTimer) clearInterval(unfocusedTimer) } catch {}
+    unfocusedTimer = null
+  }
+
+  const startUnfocusedPoke = () => {
+    // 只在便签模式启用：主窗口不需要这种“后台定时 poke”，否则就是在烧 CPU。
+    if (!document?.body?.classList?.contains('sticky-note-mode')) return
+    if (unfocusedTimer) return
+    let n = 0
+    unfocusedTimer = setInterval(() => {
+      n++
+      schedule()
+      // 兜底：最多跑 6 次（~3 秒），足够覆盖 DWM 延迟合成的窗口期
+      if (n >= 6) stopUnfocusedPoke()
+    }, 520)
+  }
+
   const schedule = () => {
     if (settling) return
     // 1) 拖动过程中节流 poke，尽量不影响拖动手感
@@ -6274,8 +6293,22 @@ function initWindowsCompositorPoke() {
       const win = getCurrentWindow()
       try { await win.onMoved(() => schedule()) } catch {}
       try { await win.onResized(() => schedule()) } catch {}
-      // 切换到其它程序再切回来时，透明 surface 也可能没刷新（表现为顶部白条）
-      try { await win.onFocusChanged(({ payload }) => { if (payload) schedule() }) } catch {}
+      // 切换到其它程序再切回来/切走时，透明 surface 也可能没刷新（表现为顶部白条）
+      // 重点：便签窗口固定不动时，只能靠 focus 事件来触发刷新。
+      try {
+        await win.onFocusChanged(({ payload }) => {
+          // 获得焦点：正常 schedule 一次即可
+          if (payload) {
+            stopUnfocusedPoke()
+            return schedule()
+          }
+          // 失去焦点：DWM 往往在“失焦后的若干帧”才把那条丑东西画出来，所以做几次延迟 poke。
+          setTimeout(() => schedule(), 80)
+          setTimeout(() => schedule(), 260)
+          setTimeout(() => schedule(), 520)
+          startUnfocusedPoke()
+        })
+      } catch {}
       // 跨屏/改缩放时同样可能触发合成残影
       try { await win.onScaleChanged(() => schedule()) } catch {}
     } catch {}
@@ -6284,10 +6317,20 @@ function initWindowsCompositorPoke() {
   // 兜底：某些情况下 Tauri focus 事件可能丢，浏览器侧 focus/visibility 仍能捕获
   try {
     window.addEventListener('focus', () => schedule(), { passive: true })
+    window.addEventListener('blur', () => {
+      // 同理：失焦后做几次延迟 poke
+      schedule()
+      setTimeout(() => schedule(), 120)
+      setTimeout(() => schedule(), 320)
+      startUnfocusedPoke()
+    }, { passive: true })
     document.addEventListener('visibilitychange', () => {
       try { if (!document.hidden) schedule() } catch {}
     }, { passive: true } as any)
   } catch {}
+
+  // 启动后做一次 settle：便签窗口固定不动时也需要靠它清掉“首次合成残影”
+  try { setTimeout(() => schedule(), 260) } catch {}
 }
 
 

@@ -2,6 +2,11 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.2.7
+- Improved: Moved library add/remove/rename into “Library Settings”; removal only detaches it from the list and won’t delete files on disk
+- Fixed: Window operations like double-click maximize / pull-down restore
+- Improved: Create document/folder/rename dialogs no longer close when clicking the overlay, preventing accidental close while selecting text
+
 ## Update v1.2.6
 - Fixed: On Windows, transparent windows could occasionally show a top “white bar/ghosting” after dragging / focus changes / display-scale changes (also covers Sticky Note window)
 - Improved: Sticky Note mode now autosaves on every change (debounced + serialized writes); forces a flush on blur and before switching back to preview, reducing the chance of losing edits

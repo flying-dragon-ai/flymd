@@ -32,6 +32,10 @@ const STORAGE_KEY = `${PLUGIN_ID}:settings`
 const DEFAULT_SETTINGS = {
   autoRefresh: true,
   maxDepth: 6,
+  // 长文本节点换行：用 markmap 的 maxWidth 限制节点最大宽度，再配合 CSS 让文本真正换行。
+  // wrapWidth: 0 表示自动（随面板宽度计算）。
+  wrapText: true,
+  wrapWidth: 0,
   pngScale: 2,
   pngBackground: 'auto', // 'auto' | 'transparent' | '#ffffff' | '#111111'
   panelWidth: PANEL_WIDTH,
@@ -59,6 +63,15 @@ let _themeListenerBound = false
 let _onThemeChanged = null
 let _settings = { ...DEFAULT_SETTINGS }
 let _disposeCtxMenu = null
+
+// AI 提纲（可选）：只影响脑图渲染，不改文档内容。
+let _aiMode = false
+let _aiBusy = false
+let _aiOutlineMd = ''
+let _aiOutlineDocHash = ''
+let _aiBtnEl = null
+let _aiOriginBtnEl = null
+let _lastRenderUsedAi = false
 
 // 全屏遮罩（覆盖文档的 JS 弹窗）：只允许通过按钮关闭，不因失焦/点击遮罩关闭。
 let _fsVisible = false
@@ -108,6 +121,8 @@ async function loadSettings(ctx) {
     if (raw && typeof raw === 'object') {
       _settings = { ...DEFAULT_SETTINGS, ...raw }
       _settings.maxDepth = clampInt(_settings.maxDepth, 1, 20, DEFAULT_SETTINGS.maxDepth)
+      _settings.wrapText = !!_settings.wrapText
+      _settings.wrapWidth = clampWrapWidth(_settings.wrapWidth)
       _settings.pngScale = clampInt(_settings.pngScale, 1, 6, DEFAULT_SETTINGS.pngScale)
       _settings.panelWidth = clampInt(_settings.panelWidth, PANEL_MIN_WIDTH, PANEL_MAX_WIDTH, DEFAULT_SETTINGS.panelWidth)
       return
@@ -184,6 +199,12 @@ function ensurePanelMounted(ctx) {
     try { await saveSettings(ctx) } catch {}
     // 尺寸变化后做一次 fit，避免图挤在角落。
     try { if (_mmPanel) await _mmPanel.fit() } catch {}
+    // 自动换行宽度依赖面板尺寸，拖拽结束后强制重渲染一次，别靠运气。
+    try {
+      if (_settings.wrapText && !clampWrapWidth(_settings.wrapWidth)) {
+        renderMindmap(ctx, { force: true })
+      }
+    } catch {}
   }
   resizer.addEventListener('pointerdown', (ev) => {
     try { ev.preventDefault() } catch {}
@@ -230,6 +251,11 @@ function ensurePanelMounted(ctx) {
   const refreshBtn = mkBtn(mmText('刷新', 'Refresh'), () => renderMindmap(ctx, { force: true }))
   const zoomBtn = mkBtn(mmText('全屏', 'Fullscreen'), () => setFullscreenVisible(ctx, true))
   zoomBtn.title = mmText('全屏放大查看（遮挡文档）', 'Fullscreen overlay (cover document)')
+  const aiBtn = mkBtn(mmText('AI提纲', 'AI Outline'), () => onAiOutlineClicked(ctx))
+  aiBtn.title = mmText('用 AI 把文档整理成可读的提纲（只用于脑图，不改文档）', 'Ask AI to generate an outline for mindmap (view-only)')
+  const originBtn = mkBtn(mmText('原文', 'Original'), () => setAiMode(ctx, false))
+  originBtn.title = mmText('切回用原文渲染', 'Render with original document')
+  originBtn.style.display = 'none'
   const exportSvgBtn = mkBtn(mmText('导出SVG', 'Export SVG'), () => exportSvg(ctx))
   const exportPngBtn = mkBtn(mmText('导出PNG', 'Export PNG'), () => exportPng(ctx))
   const closeBtn = mkBtn('X', () => setPanelVisible(ctx, false))
@@ -238,9 +264,15 @@ function ensurePanelMounted(ctx) {
   toolbar.appendChild(title)
   toolbar.appendChild(refreshBtn)
   toolbar.appendChild(zoomBtn)
+  toolbar.appendChild(aiBtn)
+  toolbar.appendChild(originBtn)
   toolbar.appendChild(exportSvgBtn)
   toolbar.appendChild(exportPngBtn)
   toolbar.appendChild(closeBtn)
+
+  _aiBtnEl = aiBtn
+  _aiOriginBtnEl = originBtn
+  syncAiButtons()
 
   const opts = getDoc().createElement('div')
   opts.style.display = 'flex'
@@ -295,8 +327,55 @@ function ensurePanelMounted(ctx) {
   depthWrap.appendChild(depthTxt)
   depthWrap.appendChild(depthInput)
 
+  // 长文本换行（maxWidth + CSS）
+  const wrapOpt = getDoc().createElement('label')
+  wrapOpt.style.display = 'inline-flex'
+  wrapOpt.style.alignItems = 'center'
+  wrapOpt.style.gap = '6px'
+  wrapOpt.style.userSelect = 'none'
+  const wrapCb = getDoc().createElement('input')
+  wrapCb.type = 'checkbox'
+  wrapCb.checked = !!_settings.wrapText
+  const wrapTxt = getDoc().createElement('span')
+  wrapTxt.textContent = mmText('换行', 'Wrap')
+  wrapOpt.appendChild(wrapCb)
+  wrapOpt.appendChild(wrapTxt)
+
+  const wrapWidthWrap = getDoc().createElement('label')
+  wrapWidthWrap.style.display = _settings.wrapText ? 'inline-flex' : 'none'
+  wrapWidthWrap.style.alignItems = 'center'
+  wrapWidthWrap.style.gap = '6px'
+  wrapWidthWrap.style.userSelect = 'none'
+  const wrapWidthTxt = getDoc().createElement('span')
+  wrapWidthTxt.textContent = mmText('宽度', 'Width')
+  const wrapWidthInput = getDoc().createElement('input')
+  wrapWidthInput.type = 'number'
+  wrapWidthInput.min = '0'
+  wrapWidthInput.max = '1200'
+  wrapWidthInput.value = String(clampWrapWidth(_settings.wrapWidth))
+  wrapWidthInput.placeholder = '0'
+  wrapWidthInput.style.width = '64px'
+  wrapWidthInput.title = mmText('0=自动，单位像素', '0=auto, px')
+  wrapWidthInput.addEventListener('change', async () => {
+    _settings.wrapWidth = clampWrapWidth(wrapWidthInput.value)
+    wrapWidthInput.value = String(_settings.wrapWidth)
+    await saveSettings(ctx)
+    renderMindmap(ctx, { force: true })
+  })
+  wrapWidthWrap.appendChild(wrapWidthTxt)
+  wrapWidthWrap.appendChild(wrapWidthInput)
+
+  wrapCb.addEventListener('change', async () => {
+    _settings.wrapText = !!wrapCb.checked
+    wrapWidthWrap.style.display = _settings.wrapText ? 'inline-flex' : 'none'
+    await saveSettings(ctx)
+    renderMindmap(ctx, { force: true })
+  })
+
   opts.appendChild(autoCb)
   opts.appendChild(depthWrap)
+  opts.appendChild(wrapOpt)
+  opts.appendChild(wrapWidthWrap)
 
   const graphWrap = getDoc().createElement('div')
   graphWrap.style.flex = '1'
@@ -603,6 +682,57 @@ function getRootLabel(ctx, md) {
   return mmText('未命名文档', 'Untitled')
 }
 
+const WRAP_CSS_ATTR = `data-${PLUGIN_ID}-wrap-css`
+function ensureWrapCssInjected() {
+  try {
+    const existed = getDoc().querySelector(`style[${WRAP_CSS_ATTR}="1"]`)
+    if (existed) return
+    const st = getDoc().createElement('style')
+    st.setAttribute(WRAP_CSS_ATTR, '1')
+    // 只在 SVG 加了 `${PLUGIN_ID}-wrap` 类时才生效，避免影响别的 markmap 实例。
+    st.textContent = `
+      svg.${PLUGIN_ID}-wrap foreignObject,
+      svg.${PLUGIN_ID}-wrap foreignObject * { overflow: visible; }
+
+      svg.${PLUGIN_ID}-wrap foreignObject > div {
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+    `.trim()
+    getDoc().head.appendChild(st)
+  } catch {}
+}
+
+function clampWrapWidth(n) {
+  // 0 = 自动
+  const v = Math.floor(Number(n))
+  if (!Number.isFinite(v) || v <= 0) return 0
+  return Math.max(120, Math.min(1200, v))
+}
+
+function computeAutoWrapWidthPx(fallbackPanelWidthPx) {
+  // 经验值：节点宽度取面板宽度的 ~55%，避免一行太长/太短。
+  const w = Math.floor(Number(fallbackPanelWidthPx) || 0)
+  const base = w > 0 ? w : PANEL_WIDTH
+  return Math.max(180, Math.min(560, Math.floor(base * 0.55)))
+}
+
+function computeMarkmapMaxWidthPx(containerWidthPx) {
+  if (!_settings.wrapText) return 0
+  const manual = clampWrapWidth(_settings.wrapWidth)
+  if (manual > 0) return manual
+  return computeAutoWrapWidthPx(containerWidthPx)
+}
+
+function hasUsefulStructure(md) {
+  const s = String(md || '')
+  // 有二级标题或列表，基本就能撑起脑图层次。
+  if (/^#{2,6}\s+\S/m.test(s)) return true
+  if (/^\s*(?:[-*+]|\d+\.)\s+\S/m.test(s)) return true
+  return false
+}
+
 async function ensureMarkmapLoaded(ctx) {
   // 注意：markmap 可能已被加载（例如插件热重载/二次激活），但我们自己的 _transformer 可能还是 null。
   // 所以这里不能“看到 window.markmap 就直接 return”，必须确保 Transformer 与 CSS 都准备好。
@@ -618,6 +748,7 @@ async function ensureMarkmapLoaded(ctx) {
         getDoc().head.appendChild(st)
       } catch {}
     }
+    ensureWrapCssInjected()
 
     if (!_transformer) {
       try { _transformer = new mm.Transformer() } catch {}
@@ -669,6 +800,7 @@ async function ensureMarkmapLoaded(ctx) {
         getDoc().head.appendChild(st)
       } catch {}
     }
+    ensureWrapCssInjected()
 
     if (!_transformer) {
       try { _transformer = new mm.Transformer() } catch {}
@@ -880,7 +1012,10 @@ function bindMarkmapJump(ctx, svgEl) {
       const label = mmNormText((hit.el && hit.el.textContent) || '')
       // 先滚动可见视图（阅读/所见），然后再定位源码（永远不改内容）。
       try { tryScrollReadable(label) } catch {}
-      try { gotoEditorLine(info.startLine1) } catch {}
+      // AI 提纲的行号来自“AI 输出”，不可能精确映射回原文；别瞎跳。
+      if (!_lastRenderUsedAi) {
+        try { gotoEditorLine(info.startLine1) } catch {}
+      }
     } catch (e) {
       console.error('[doc-mindmap] jump error:', e)
       safeNotice(ctx, '跳转失败', 'Jump failed', 'err', 2000)
@@ -889,9 +1024,149 @@ function bindMarkmapJump(ctx, svgEl) {
 }
 
 function buildMarkmapSource(ctx) {
-  const md = ctx.getSourceText ? ctx.getSourceText() : (ctx.getEditorValue ? ctx.getEditorValue() : '')
-  const hash = hashText(md + '|' + String(_settings.maxDepth || ''))
-  return { md, hash }
+  const md0 = ctx.getSourceText ? ctx.getSourceText() : (ctx.getEditorValue ? ctx.getEditorValue() : '')
+  const docHash = hashText(md0)
+  // 文档变了就别继续挂着“AI 模式”装死：提纲已过期。
+  if (_aiMode && _aiOutlineDocHash && _aiOutlineDocHash !== docHash) {
+    _aiMode = false
+    syncAiButtons()
+  }
+  const canUseAi = _aiMode && _aiOutlineMd && _aiOutlineDocHash && _aiOutlineDocHash === docHash
+  const md = canUseAi ? _aiOutlineMd : md0
+  const aiHash = canUseAi ? hashText(_aiOutlineMd) : ''
+  const wrapKey = (_settings.wrapText ? '1' : '0') + '|' + String(clampWrapWidth(_settings.wrapWidth))
+  const hash = hashText(docHash + '|' + (canUseAi ? 'ai' : 'doc') + '|' + aiHash + '|' + String(_settings.maxDepth || '') + '|' + wrapKey)
+  return { md, hash, docHash, usedAi: canUseAi }
+}
+
+function syncAiButtons() {
+  try {
+    if (_aiOriginBtnEl) _aiOriginBtnEl.style.display = _aiMode ? '' : 'none'
+  } catch {}
+  try {
+    if (_aiBtnEl) _aiBtnEl.disabled = !!_aiBusy
+  } catch {}
+  try {
+    if (_aiBtnEl) _aiBtnEl.textContent = _aiBusy ? mmText('AI生成中...', 'AI...') : mmText('AI提纲', 'AI Outline')
+  } catch {}
+}
+
+function setAiMode(ctx, on) {
+  _aiMode = !!on
+  syncAiButtons()
+  // 只影响渲染，不改文档内容；切换模式直接强刷一次。
+  try { renderMindmap(ctx, { force: true }) } catch {}
+}
+
+function normalizeAiOutlineMd(raw, title) {
+  let t = String(raw || '').trim()
+  if (!t) return ''
+
+  // 优先取 ```markdown ... ``` 里的内容，避免模型夹带解释。
+  try {
+    const m = t.match(/```(?:markdown|md)?\s*([\s\S]*?)\s*```/i)
+    if (m && m[1]) t = String(m[1]).trim()
+  } catch {}
+
+  // 再做一次兜底剥离开头/结尾的 fence。
+  try { t = t.replace(/^```[a-zA-Z0-9_-]*\s*/i, '').trim() } catch {}
+  try { t = t.replace(/```\s*$/i, '').trim() } catch {}
+
+  // 没有根节点就补一个（markmap 需要层次结构）
+  const hasHeading = /^#\s+\S/m.test(t)
+  const hasList = /^\s*(?:[-*+]|\d+\.)\s+\S/m.test(t)
+  if (!hasHeading) {
+    const root = String(title || '').trim() || mmText('未命名文档', 'Untitled')
+    t = `# ${root}\n\n` + t
+  }
+  if (!hasList && !/^#{2,6}\s+\S/m.test(t)) {
+    // 仍然没有二级标题/列表：把它变成最简单的列表，别让脑图只剩一根棍子。
+    const one = t.replace(/\s+/g, ' ').trim().slice(0, 200)
+    t = `# ${String(title || '').trim() || mmText('未命名文档', 'Untitled')}\n\n- ${one || mmText('（AI 输出为空）', '(empty)')}`
+  }
+  return t.trim()
+}
+
+async function onAiOutlineClicked(ctx) {
+  if (_aiBusy) return
+  try {
+    const md0 = ctx.getSourceText ? ctx.getSourceText() : (ctx.getEditorValue ? ctx.getEditorValue() : '')
+    const docHash = hashText(md0)
+    const docTrim = String(md0 || '').trim()
+    if (!docTrim) {
+      safeNotice(ctx, '文档内容为空', 'Document is empty', 'err', 2200)
+      return
+    }
+
+    // 有缓存且当前没开 AI 模式：直接切过去，别重复花钱。
+    if (!_aiMode && _aiOutlineDocHash === docHash && _aiOutlineMd) {
+      setAiMode(ctx, true)
+      return
+    }
+
+    const ai = ctx.getPluginAPI && ctx.getPluginAPI('ai-assistant')
+    if (!ai || typeof ai.callAI !== 'function') {
+      safeNotice(ctx, '未找到 AI 助手插件（ai-assistant），无法生成提纲', 'AI assistant (ai-assistant) not found', 'err', 2600)
+      return
+    }
+    if (typeof ai.isConfigured === 'function') {
+      const ok = await ai.isConfigured()
+      if (!ok) {
+        safeNotice(ctx, '请先在 AI 助手里配置 Key 或切换免费模式', 'Please configure AI Assistant first', 'err', 2600)
+        return
+      }
+    }
+
+    _aiBusy = true
+    syncAiButtons()
+    setStatus('AI 生成提纲中...', 'Generating outline...')
+
+    // 不搞玄学：只截断到一个合理范围，避免把整个超长文档全塞给模型。
+    let maxChars = 48000
+    try {
+      const cfg = (typeof ai.getConfig === 'function') ? await ai.getConfig() : null
+      const v = cfg && cfg.limits && cfg.limits.maxCtxChars
+      const n = clampInt(v, 2000, 256000, 48000)
+      maxChars = Math.min(80000, n)
+    } catch {}
+
+    const sliced = docTrim.length > maxChars ? docTrim.slice(docTrim.length - maxChars) : docTrim
+    const title = getRootLabel(ctx, md0)
+
+    const system =
+      '你是资深技术写作者。你只输出 Markdown，不要解释，不要加代码块，不要加多余前后缀。'
+    const prompt = [
+      '把下面这段 Markdown 整理成「脑图提纲」：',
+      '',
+      '硬性要求：',
+      `- 第一行用 "# ${title}" 作为根标题（必须有）`,
+      '- 用标题(##/###/####)和/或列表(-)表达层级，最多 4 层',
+      '- 每行尽量短，避免超过 30 个汉字；长句拆成多个要点',
+      '- 保留原文关键信息，不要编造不存在的内容',
+      '',
+      '文档内容：',
+      '',
+      sliced
+    ].join('\n')
+
+    const raw = await ai.callAI(prompt, { system })
+    const out = normalizeAiOutlineMd(raw, title)
+    if (!out) throw new Error('AI 输出为空')
+
+    _aiOutlineDocHash = docHash
+    _aiOutlineMd = out
+    _aiMode = true
+    setStatus('AI 提纲已生成', 'AI outline ready')
+    syncAiButtons()
+    renderMindmap(ctx, { force: true })
+  } catch (e) {
+    console.error('[doc-mindmap] AI outline error:', e)
+    safeNotice(ctx, 'AI 生成提纲失败', 'AI outline failed', 'err', 2600)
+    setStatus('AI 生成失败', 'AI failed')
+  } finally {
+    _aiBusy = false
+    syncAiButtons()
+  }
 }
 
 async function renderMindmap(ctx, { force }) {
@@ -900,12 +1175,13 @@ async function renderMindmap(ctx, { force }) {
     ensurePanelMounted(ctx)
     if (!_graphWrap) return
 
-    const { md, hash } = buildMarkmapSource(ctx)
+    const { md, hash, usedAi } = buildMarkmapSource(ctx)
     if (!force && hash === _lastHash) return
     _lastHash = hash
     _lastMd = md
+    _lastRenderUsedAi = !!usedAi
 
-    setStatus('渲染中...', 'Rendering...')
+    setStatus(usedAi ? '渲染中（AI）...' : '渲染中...', usedAi ? 'Rendering (AI)...' : 'Rendering...')
     const mm = await ensureMarkmapLoaded(ctx)
 
     if (!_transformer) {
@@ -918,6 +1194,20 @@ async function renderMindmap(ctx, { force }) {
     const opts = mm.deriveOptions((result.frontmatter && result.frontmatter.markmap) || {})
     // 主题：markmap 没有“内置暗色主题”，但它会继承页面字体颜色；这里让线条对比更稳一点。
     opts.color = opts.color || mm.defaultOptions.color
+    // 长文本换行：maxWidth + CSS（只对本插件的 SVG 生效）
+    try {
+      const panelW = (() => {
+        try {
+          const r = _panelRoot && _panelRoot.getBoundingClientRect ? _panelRoot.getBoundingClientRect() : null
+          const w = r && r.width ? Number(r.width) : 0
+          return w > 0 ? w : Number(_settings.panelWidth) || PANEL_WIDTH
+        } catch {
+          return Number(_settings.panelWidth) || PANEL_WIDTH
+        }
+      })()
+      const maxWidth = computeMarkmapMaxWidthPx(panelW)
+      if (maxWidth > 0) opts.maxWidth = maxWidth
+    } catch {}
 
     // 初始化 / 更新面板 SVG：直接占满面板，不要搞滚动条/缩放容器那套垃圾。
     if (_panelSvg && !_panelSvg.isConnected) {
@@ -929,12 +1219,21 @@ async function renderMindmap(ctx, { force }) {
       _graphWrap.innerHTML = ''
       const svg = getDoc().createElementNS('http://www.w3.org/2000/svg', 'svg')
       try { svg.classList.add('markmap') } catch {}
+      try {
+        if (_settings.wrapText) svg.classList.add(`${PLUGIN_ID}-wrap`)
+        else svg.classList.remove(`${PLUGIN_ID}-wrap`)
+      } catch {}
       svg.style.width = '100%'
       svg.style.height = '100%'
       svg.style.display = 'block'
       svg.setAttribute('role', 'img')
       _graphWrap.appendChild(svg)
       _panelSvg = svg
+    } else {
+      try {
+        if (_settings.wrapText) _panelSvg.classList.add(`${PLUGIN_ID}-wrap`)
+        else _panelSvg.classList.remove(`${PLUGIN_ID}-wrap`)
+      } catch {}
     }
     if (!_mmPanel) {
       _mmPanel = mm.Markmap.create(_panelSvg, opts)
@@ -946,7 +1245,11 @@ async function renderMindmap(ctx, { force }) {
     await _mmPanel.setData(root)
     await _mmPanel.fit()
     _lastSvg = _panelSvg.outerHTML
-    setStatus('完成', 'Done')
+    if (!usedAi && !hasUsefulStructure(md)) {
+      setStatus('完成（提示：可点“AI提纲”生成结构）', 'Done (Tip: AI Outline can generate structure)')
+    } else {
+      setStatus(usedAi ? '完成（AI）' : '完成', usedAi ? 'Done (AI)' : 'Done')
+    }
   } catch (e) {
     console.error('[doc-mindmap] render error:', e)
     if (_graphWrap) {
@@ -971,10 +1274,11 @@ async function renderMindmapFullscreen(ctx, { force }) {
     ensureFullscreenMounted(ctx)
     if (!_fsSvg) return
 
-    const { md, hash } = buildMarkmapSource(ctx)
+    const { md, hash, usedAi } = buildMarkmapSource(ctx)
     if (!force && hash === _lastHash) return
     _lastHash = hash
     _lastMd = md
+    _lastRenderUsedAi = !!usedAi
 
     const mm = await ensureMarkmapLoaded(ctx)
     if (!_transformer) {
@@ -985,6 +1289,19 @@ async function renderMindmapFullscreen(ctx, { force }) {
     const root = pruneTreeByDepth(result.root, _settings.maxDepth)
     const opts = mm.deriveOptions((result.frontmatter && result.frontmatter.markmap) || {})
     opts.color = opts.color || mm.defaultOptions.color
+    try {
+      const w = (() => {
+        try {
+          const r = _fsRoot && _fsRoot.getBoundingClientRect ? _fsRoot.getBoundingClientRect() : null
+          const ww = r && r.width ? Number(r.width) : 0
+          return ww > 0 ? ww : Number(window.innerWidth) || 1200
+        } catch {
+          return Number(window.innerWidth) || 1200
+        }
+      })()
+      const maxWidth = computeMarkmapMaxWidthPx(w)
+      if (maxWidth > 0) opts.maxWidth = maxWidth
+    } catch {}
 
     if (!_mmFs) {
       _mmFs = mm.Markmap.create(_fsSvg, opts)
@@ -992,6 +1309,10 @@ async function renderMindmapFullscreen(ctx, { force }) {
     } else {
       try { _mmFs.setOptions(opts) } catch {}
     }
+    try {
+      if (_settings.wrapText) _fsSvg.classList.add(`${PLUGIN_ID}-wrap`)
+      else _fsSvg.classList.remove(`${PLUGIN_ID}-wrap`)
+    } catch {}
     await _mmFs.setData(root)
     await _mmFs.fit()
     _lastSvg = _fsSvg.outerHTML
@@ -1052,6 +1373,20 @@ function getMarkmapGlobalCss() {
   return ''
 }
 
+function getDocMindmapExtraCssForExport() {
+  // 和 ensureWrapCssInjected() 保持一致：导出 SVG/PNG 也要能换行。
+  return `
+    svg.${PLUGIN_ID}-wrap foreignObject,
+    svg.${PLUGIN_ID}-wrap foreignObject * { overflow: visible; }
+
+    svg.${PLUGIN_ID}-wrap foreignObject > div {
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+  `.trim()
+}
+
 function buildSvgForExport(svgEl, bgColor, width, height) {
   // 导出必须自包含：把 markmap.globalCSS 塞进 <style>，否则离开宿主就样式全丢。
   const clone = svgEl.cloneNode(true)
@@ -1064,7 +1399,7 @@ function buildSvgForExport(svgEl, bgColor, width, height) {
 
   const ns = 'http://www.w3.org/2000/svg'
   let styleEl = null
-  const css = getMarkmapGlobalCss()
+  const css = [getMarkmapGlobalCss(), getDocMindmapExtraCssForExport()].filter(Boolean).join('\n\n')
   if (css) {
     try {
       styleEl = getDoc().createElementNS(ns, 'style')
@@ -1301,6 +1636,13 @@ export function deactivate() {
   _graphWrap = null
   _resizerEl = null
   _statusEl = null
+  _aiBtnEl = null
+  _aiOriginBtnEl = null
+  _aiMode = false
+  _aiBusy = false
+  _aiOutlineMd = ''
+  _aiOutlineDocHash = ''
+  _lastRenderUsedAi = false
   try {
     if (_fsRoot && _fsRoot.parentNode) _fsRoot.parentNode.removeChild(_fsRoot)
   } catch {}

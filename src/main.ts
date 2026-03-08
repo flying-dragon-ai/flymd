@@ -52,6 +52,7 @@ import { saveImageToLocalAndGetPathCore, toggleUploaderEnabledFromMenuCore } fro
 // 方案A：多库管理（统一 libraries/activeLibraryId）
 import { getLibraries, getActiveLibraryId, getActiveLibraryRoot, setActiveLibraryId as setActiveLibId, upsertLibrary, removeLibrary as removeLib, renameLibrary as renameLib, getLibSwitcherPosition } from './utils/library'
 import { initRibbonLibraryList, type RibbonLibraryListApi } from './ui/ribbonLibraryList'
+import { bindSharedStore } from './utils/sharedStore'
 import appIconUrl from '../Flymdnew.png?url'
 import { decorateCodeBlocks } from './decorate'
 import { ribbonIcons } from './icons'
@@ -845,6 +846,7 @@ async function restoreConfigFromPayload(payload: ConfigBackupPayload): Promise<{
     }
   } catch {}
   store = null
+  try { bindSharedStore(null) } catch {}
   let pluginFiles = 0
   let hasSettings = false
   let hasAppDataScope = false
@@ -875,6 +877,7 @@ async function restoreConfigFromPayload(payload: ConfigBackupPayload): Promise<{
   try {
     store = await Store.load(SETTINGS_FILE_NAME)
     await store?.save()
+    try { bindSharedStore(store) } catch {}
   } catch {}
   return { settings: hasSettings, pluginFiles }
 }
@@ -3341,6 +3344,7 @@ async function initStore() {
     console.log('初始化应用存储...')
     // Tauri v2 使用 Store.load，在应用数据目录下持久化
     store = await Store.load('flymd-settings.json')
+    try { bindSharedStore(store) } catch {}
     console.log('存储初始化成功')
     void logInfo('应用存储初始化成功')
     return true
@@ -3348,6 +3352,7 @@ async function initStore() {
     console.error('存储初始化失败:', error)
     console.warn('将以无持久化（内存）模式运行')
     void logWarn('存储初始化失败：使用内存模式', error)
+    try { bindSharedStore(null) } catch {}
     return false
   }
 }

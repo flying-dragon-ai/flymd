@@ -2,13 +2,14 @@
 // - F5 手动同步；启动时同步；关闭前异步触发同步（不阻塞）
 // - 仅按最后修改时间比较；新者覆盖旧者；不做合并
 
-import { Store } from '@tauri-apps/plugin-store'
+import type { Store } from '@tauri-apps/plugin-store'
 import { getActiveLibraryRoot, getActiveLibraryId, getActiveLibraryName } from '../utils/library'
 import { readDir, stat, readFile, writeFile, mkdir, exists, open as openFileHandle, BaseDirectory, remove } from '@tauri-apps/plugin-fs'
 import { appLocalDataDir } from '@tauri-apps/api/path'
 import { ask } from '@tauri-apps/plugin-dialog'
 import { t } from '../i18n'
 import { showConflictDialog, showLocalDeleteDialog, showRemoteDeleteDialog, showUploadMissingRemoteDialog } from '../dialog'
+import { getSharedStore } from '../utils/sharedStore'
 
 // 当前同步通知ID（用于更新同一条通知）
 let _currentSyncNotificationId: string | null = null
@@ -830,11 +831,8 @@ export type WebdavExtraSyncPath = {
   path: string
 }
 
-let _store: Store | null = null
 async function getStore(): Promise<Store> {
-  if (_store) return _store
-  _store = await Store.load('flymd-settings.json')
-  return _store
+  return await getSharedStore()
 }
 
 // 额外同步路径（由插件注册），使用目录前缀匹配；按 owner 隔离，便于开关控制

@@ -5,21 +5,18 @@
 // - 允许在关闭“自动图床”的情况下，仍然手动上传当前图片
 
 import { readFile } from '@tauri-apps/plugin-fs'
-import { Store } from '@tauri-apps/plugin-store'
+import type { Store } from '@tauri-apps/plugin-store'
 import type { ContextMenuContext } from '../ui/contextMenus'
 import type { AnyUploaderConfig } from './types'
 import { uploadImageToCloud } from './upload'
 import { transcodeToWebpIfNeeded } from '../utils/image'
 import { NotificationManager } from '../core/uiNotifications'
 import { parseUploaderConfigForManagement } from './storeConfig'
-
-let _store: Store | null = null
+import { getSharedStore } from '../utils/sharedStore'
 
 async function getStore(): Promise<Store | null> {
-  if (_store) return _store
   try {
-    _store = await Store.load('flymd-settings.json')
-    return _store
+    return await getSharedStore()
   } catch {
     return null
   }

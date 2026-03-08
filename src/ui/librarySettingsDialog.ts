@@ -6,6 +6,7 @@ import { getLibraries, getActiveLibraryId, applyLibrariesSettings, getLibSwitche
 import { getWebdavSyncConfigForLibrary, setWebdavSyncConfigForLibrary, openWebdavSyncDialog } from '../extensions/webdavSync'
 import { openRenameDialog } from './linkDialogs'
 import { ask, open } from '@tauri-apps/plugin-dialog'
+import { normalizePath as normalizeFsPath } from '../core/fsSafe'
 
 type Opts = {
   // 通知外部刷新 UI（例如库侧栏的库列表）
@@ -54,7 +55,8 @@ async function pickLibraryRoot(): Promise<string | null> {
     const sel = await open({ directory: true, multiple: false } as any)
     if (!sel) return null
     const raw = Array.isArray(sel) ? (sel[0] || '') : sel
-    return String(raw || '').trim() || null
+    const p = String(normalizeFsPath(raw) || '').trim()
+    return p || null
   } catch {
     return null
   }
@@ -431,7 +433,10 @@ export async function openLibrarySettingsDialog(opts: Opts = {}): Promise<void> 
       syncSelectedUiFromDraft()
       renderList()
       showNotice(t('lib.settings.added') || '已新增')
-    } catch {}
+    } catch (e) {
+      console.warn('[库设置] 新增库失败', e)
+      showNotice('新增失败：请查看控制台日志')
+    }
   })
 
   overlay.querySelector('#lib-settings-open-webdav')?.addEventListener('click', async () => {

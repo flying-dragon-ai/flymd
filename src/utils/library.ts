@@ -1,7 +1,8 @@
 // 库管理工具（方案A实现）：统一在 flymd-settings.json 中维护 libraries/activeLibraryId
 // 保持与 legacy 字段 libraryRoot 的兼容（始终与当前激活库的 root 同步）
 
-import { Store } from '@tauri-apps/plugin-store'
+import type { Store } from '@tauri-apps/plugin-store'
+import { getSharedStore } from './sharedStore'
 
 // 库实体类型
 export type Library = {
@@ -14,22 +15,51 @@ export type Library = {
   sidebarVisible?: boolean
 }
 
-let _store: Store | null = null
 async function getStore(): Promise<Store> {
-  if (_store) return _store
-  _store = await Store.load('flymd-settings.json')
-  return _store
+  return await getSharedStore()
 }
 
 function normalizePath(p: string): string {
   try {
-    const s = String(p || '')
+    let s = String(p || '').trim()
     if (!s) return ''
+    // 某些平台/实现可能返回 file:// URI；这里统一转回本地路径
+    try {
+      if (/^file:/i.test(s)) {
+        const u = new URL(s)
+        const host = u.hostname || ''
+        let path = u.pathname || ''
+        // Windows：/C:/a/b -> C:/a/b
+        if (/^\/[a-zA-Z]:\//.test(path)) path = path.slice(1)
+        try { path = decodeURIComponent(path) } catch {}
+        if (host) {
+          // UNC：file://server/share/path -> \\server\share\path
+          const pathPart = path.replace(/^\//, '').replace(/\//g, '\\')
+          s = '\\\\' + host + (pathPart ? '\\' + pathPart : '')
+        } else {
+          s = path
+        }
+      }
+    } catch {}
     const norm = s.replace(/\\/g, '/').replace(/\/+$/, '')
     return norm
   } catch {
     return ''
   }
+}
+
+function toStoreLibrary(l: Library): Record<string, any> {
+  // 重要：不要把 undefined 写进 Store（插件序列化层对 undefined 的容忍度不一致）
+  const out: any = {
+    id: String(l?.id || '').trim(),
+    name: String(l?.name || '').trim(),
+    root: normalizePath(l?.root || ''),
+  }
+  if (typeof l?.createdAt === 'number' && Number.isFinite(l.createdAt) && l.createdAt > 0) out.createdAt = l.createdAt
+  if (typeof l?.lastUsedAt === 'number' && Number.isFinite(l.lastUsedAt) && l.lastUsedAt > 0) out.lastUsedAt = l.lastUsedAt
+  // 默认 true：只在 false 时显式存，避免污染配置
+  if (l?.sidebarVisible === false) out.sidebarVisible = false
+  return out
 }
 
 async function migrateFromLegacyIfNeeded(store: Store): Promise<void> {
@@ -45,7 +75,7 @@ async function migrateFromLegacyIfNeeded(store: Store): Promise<void> {
       const now = Date.now()
       const name = (root.split(/[/]+/).filter(Boolean).pop() || `lib-${now}`)
       const lib: Library = { id: `lib-${now}`, name, root, createdAt: now, lastUsedAt: now }
-      await store.set('libraries', [lib])
+      await store.set('libraries', [toStoreLibrary(lib)])
       await store.set('activeLibraryId', lib.id)
       // 同步 legacy 字段
       await store.set('libraryRoot', lib.root)
@@ -70,7 +100,10 @@ export async function getLibraries(): Promise<Library[]> {
       const createdAt = Number((it as any).createdAt) > 0 ? Number((it as any).createdAt) : undefined
       const lastUsedAt = Number((it as any).lastUsedAt) > 0 ? Number((it as any).lastUsedAt) : undefined
       const sidebarVisible = (it as any).sidebarVisible === false ? false : true
-      arr.push({ id, name, root, createdAt, lastUsedAt, sidebarVisible })
+      const l: Library = { id, name, root, sidebarVisible }
+      if (typeof createdAt === 'number') l.createdAt = createdAt
+      if (typeof lastUsedAt === 'number') l.lastUsedAt = lastUsedAt
+      arr.push(l)
     }
     return arr
   } catch {
@@ -80,7 +113,8 @@ export async function getLibraries(): Promise<Library[]> {
 
 async function setLibraries(next: Library[]): Promise<void> {
   const store = await getStore()
-  await store.set('libraries', next)
+  const safe = (next || []).map(toStoreLibrary).filter(x => x.id && x.root)
+  await store.set('libraries', safe)
   await store.save()
 }
 

@@ -339,6 +339,14 @@ export function createStickyNoteWindowHost(
       let contentHeight = 0
       try {
         document.body.classList.add('sticky-note-measuring')
+        // 让样式有机会落地（尤其是 transition/transform 被禁用时），避免读到“半动画”的 scrollHeight。
+        await new Promise<void>((resolve) => {
+          try {
+            requestAnimationFrame(() => resolve())
+          } catch {
+            resolve()
+          }
+        })
         contentHeight = previewBody.scrollHeight
       } finally {
         try {

@@ -8078,11 +8078,6 @@ function bindEvents() {
       const w = window as any
       if (w._editorKeyHooksBound) return
       w._editorKeyHooksBound = true
-      // 反引号序列状态（全局）
-      w._btCount = 0
-      w._btTimer = null
-      w._btSelS = 0
-      w._btSelE = 0
 
       const getEditor = (): HTMLTextAreaElement | null => document.getElementById('editor') as HTMLTextAreaElement | null
       const isEditMode = () => (typeof mode !== 'undefined' && mode === 'edit' && !wysiwyg)
@@ -8103,40 +8098,20 @@ function bindEvents() {
         const ta = getEditor(); if (!ta) return
         if (e.target !== ta) return
         if (!isEditMode()) return
-        if (e.key === '*') return
         if (e.ctrlKey || e.metaKey || e.altKey) return
+        if (e.key === '*') {
+          e.preventDefault()
+          handleImmediateStarCompletion(ta)
+          return
+        }
         const val = String(ta.value || '')
         const s = ta.selectionStart >>> 0
         const epos = ta.selectionEnd >>> 0
 
-        // 反引号三连/双连/单：优先处理
+        // 反引号：即时补全，第二次扩成双反引号，第三次扩成围栏
         if (e.key === '`') {
-          const w = window as any
-          try { if (w._btTimer) { clearTimeout(w._btTimer); w._btTimer = null } } catch {}
-          w._btCount = (w._btCount || 0) + 1
-          if (w._btCount === 1) { w._btSelS = s; w._btSelE = epos }
           e.preventDefault()
-          const commit = () => {
-            const s0 = w._btSelS >>> 0, e0 = w._btSelE >>> 0
-            const before = val.slice(0, s0); const mid = val.slice(s0, e0); const after = val.slice(e0)
-            const hasNL = /\n/.test(mid)
-            if (w._btCount >= 3 || hasNL) {
-              const content = (e0 > s0 ? ('\n' + mid + '\n') : ('\n\n'))
-              ta.value = before + '```' + content + '```' + after
-              const caret = (e0 > s0) ? (s0 + content.length + 3) : (s0 + 4)
-              ta.selectionStart = ta.selectionEnd = caret
-            } else if (w._btCount === 2) {
-              ta.value = before + '``' + (e0 > s0 ? mid : '') + '``' + after
-              if (e0 > s0) { ta.selectionStart = s0 + 2; ta.selectionEnd = s0 + 2 + mid.length } else { ta.selectionStart = ta.selectionEnd = s0 + 2 }
-            } else {
-              ta.value = before + '`' + (e0 > s0 ? mid : '') + '`' + after
-              if (e0 > s0) { ta.selectionStart = s0 + 1; ta.selectionEnd = s0 + 1 + mid.length } else { ta.selectionStart = ta.selectionEnd = s0 + 1 }
-            }
-            try { dirty = true; refreshTitle(); refreshStatus() } catch {}
-            if (mode === 'preview') { try { void renderPreview() } catch {} } else if (wysiwyg) { try { scheduleWysiwygRender() } catch {} }
-            w._btCount = 0; w._btTimer = null
-          }
-          const w2 = window as any; w2._btTimer = (setTimeout as any)(commit, 280)
+          handleImmediateBacktickCompletion(ta)
           return
         }
 
@@ -8347,15 +8322,6 @@ function bindEvents() {
     if (!_findPanel) return
     try { (_findPanel as HTMLDivElement).dataset.mode = 'find-only' } catch {}
   }
-  // 所见/编辑：反引号序列状态（用于 ``` 代码围栏检测）
-  let _btCount = 0
-  let _btTimer: number | null = null
-  let _btSelS = 0
-  let _btSelE = 0
-  let _astCount = 0
-  let _astTimer: number | null = null
-  let _astSelS = 0
-  let _astSelE = 0
   function ensureFindPanel() {
     if (_findPanel) return
     const panel = document.createElement('div')
@@ -8754,6 +8720,84 @@ function bindEvents() {
       return false
     }
   }
+  function refreshEditorAfterAutoWrap() {
+    dirty = true
+    try { refreshTitle(); refreshStatus() } catch {}
+    if (mode === 'preview') { try { void renderPreview() } catch {} } else if (wysiwyg) { try { scheduleWysiwygRender() } catch {} }
+  }
+  function replaceEditorRange(ta: HTMLTextAreaElement, start: number, end: number, text: string, selStart: number, selEnd: number) {
+    const val = String(ta.value || '')
+    ta.selectionStart = start
+    ta.selectionEnd = end
+    if (!insertUndoable(ta, text)) {
+      ta.value = val.slice(0, start) + text + val.slice(end)
+    }
+    ta.selectionStart = selStart
+    ta.selectionEnd = selEnd
+    refreshEditorAfterAutoWrap()
+  }
+  function getExactMarkerWrapRange(val: string, s: number, e: number, marker: string, count: number): { start: number, end: number, inner: string } | null {
+    const token = marker.repeat(count)
+    const start = s - count
+    const end = e + count
+    if (start < 0 || end > val.length) return null
+    if (val.slice(start, s) !== token || val.slice(e, end) !== token) return null
+    if (start > 0 && val[start - 1] === marker) return null
+    if (end < val.length && val[end] === marker) return null
+    return { start, end, inner: val.slice(s, e) }
+  }
+  function handleImmediateStarCompletion(ta: HTMLTextAreaElement): boolean {
+    const val = String(ta.value || '')
+    const s = ta.selectionStart >>> 0
+    const e = ta.selectionEnd >>> 0
+    const italicWrap = getExactMarkerWrapRange(val, s, e, '*', 1)
+    if (italicWrap) {
+      const token = '**'
+      const selStart = italicWrap.start + token.length
+      const selEnd = s === e ? selStart : (selStart + italicWrap.inner.length)
+      replaceEditorRange(ta, italicWrap.start, italicWrap.end, token + italicWrap.inner + token, selStart, selEnd)
+      return true
+    }
+    if (getExactMarkerWrapRange(val, s, e, '*', 2)) return true
+    const mid = val.slice(s, e)
+    const ins = '*' + mid + '*'
+    const selStart = s + 1
+    const selEnd = e > s ? (selStart + mid.length) : selStart
+    replaceEditorRange(ta, s, e, ins, selStart, selEnd)
+    return true
+  }
+  function handleImmediateBacktickCompletion(ta: HTMLTextAreaElement): boolean {
+    const val = String(ta.value || '')
+    const s = ta.selectionStart >>> 0
+    const e = ta.selectionEnd >>> 0
+    const mid = val.slice(s, e)
+    if (e > s && /\n/.test(mid)) {
+      const content = '\n' + mid + '\n'
+      const caret = s + content.length + 3
+      replaceEditorRange(ta, s, e, '```' + content + '```', caret, caret)
+      return true
+    }
+    const doubleWrap = getExactMarkerWrapRange(val, s, e, '`', 2)
+    if (doubleWrap) {
+      const content = doubleWrap.inner ? ('\n' + doubleWrap.inner + '\n') : '\n\n'
+      const caret = doubleWrap.inner ? (doubleWrap.start + content.length + 3) : (doubleWrap.start + 4)
+      replaceEditorRange(ta, doubleWrap.start, doubleWrap.end, '```' + content + '```', caret, caret)
+      return true
+    }
+    const singleWrap = getExactMarkerWrapRange(val, s, e, '`', 1)
+    if (singleWrap) {
+      const token = '``'
+      const selStart = singleWrap.start + token.length
+      const selEnd = s === e ? selStart : (selStart + singleWrap.inner.length)
+      replaceEditorRange(ta, singleWrap.start, singleWrap.end, token + singleWrap.inner + token, selStart, selEnd)
+      return true
+    }
+    const ins = '`' + mid + '`'
+    const selStart = s + 1
+    const selEnd = e > s ? (selStart + mid.length) : selStart
+    replaceEditorRange(ta, s, e, ins, selStart, selEnd)
+    return true
+  }
 
   // 源码模式：列表回车续写（无序/有序；有序数字递增；空项回车退出列表）
   function tryHandleListEnter(ta: HTMLTextAreaElement, e: KeyboardEvent): boolean {
@@ -8868,103 +8912,16 @@ function bindEvents() {
   try {
     (editor as HTMLTextAreaElement).addEventListener('keydown', (e: KeyboardEvent) => { if ((e as any).defaultPrevented) return; if (e.ctrlKey || e.metaKey || e.altKey) return
       try { if (tryHandleListEnter(editor as HTMLTextAreaElement, e)) return } catch {}
-      // 反引号特殊处理：支持 ``` 围栏（空选区自动补全围栏；有选区则环绕为代码块）
+      // 反引号：即时补全，第二次扩成双反引号，第三次扩成围栏
       if (e.key === '`') {
-        try { if (_btTimer) { clearTimeout(_btTimer); _btTimer = null } } catch {}
-        _btCount = (_btCount || 0) + 1
-        const ta = editor as HTMLTextAreaElement
-        const val = String(ta.value || '')
-        const s0 = ta.selectionStart >>> 0
-        const e0 = ta.selectionEnd >>> 0
-        if (_btCount === 1) { _btSelS = s0; _btSelE = e0 }
         e.preventDefault()
-        const commit = () => {
-          const s = _btSelS >>> 0
-          const epos = _btSelE >>> 0
-          const before = val.slice(0, s)
-          const mid = val.slice(s, epos)
-          const after = val.slice(epos)
-          const hasNewline = /\n/.test(mid)
-          if (_btCount >= 3 || hasNewline) {
-            // 代码块围栏（可撤销）
-            const content = (epos > s ? ('\n' + mid + '\n') : ('\n\n'))
-            ta.selectionStart = s; ta.selectionEnd = epos
-            if (!insertUndoable(ta, '```' + content + '```')) {
-              ta.value = before + '```' + content + '```' + after
-            }
-            ta.selectionStart = ta.selectionEnd = (epos > s ? (s + content.length + 3) : (s + 4))
-          } else if (_btCount === 2) {
-            // 双反引号：当作行内代码（兼容场景，可撤销）
-            ta.selectionStart = s; ta.selectionEnd = epos
-            const ins = '``' + (epos > s ? mid : '') + '``'
-            if (!insertUndoable(ta, ins)) {
-              ta.value = before + ins + after
-            }
-            if (epos > s) { ta.selectionStart = s + 2; ta.selectionEnd = s + 2 + mid.length } else { ta.selectionStart = ta.selectionEnd = s + 2 }
-          } else {
-            // 单反引号：行内代码（可撤销）
-            ta.selectionStart = s; ta.selectionEnd = epos
-            const ins = '`' + (epos > s ? mid : '') + '`'
-            if (!insertUndoable(ta, ins)) {
-              ta.value = before + ins + after
-            }
-            if (epos > s) { ta.selectionStart = s + 1; ta.selectionEnd = s + 1 + mid.length } else { ta.selectionStart = ta.selectionEnd = s + 1 }
-          }
-          dirty = true; try { refreshTitle(); refreshStatus() } catch {}
-          if (mode === 'preview') { try { void renderPreview() } catch {} } else if (wysiwyg) { try { scheduleWysiwygRender() } catch {} }
-          _btCount = 0; _btTimer = null
-        }
-        _btTimer = (setTimeout as any)(commit, 320)
+        handleImmediateBacktickCompletion(editor as HTMLTextAreaElement)
         return
       }
-            // 星号连击：1次斜体(*)；2次加粗(**)；与反引号逻辑一致，延迟收敛，避免第二次被当成“跳过右侧”
+      // 星号：第一次斜体，第二次立刻扩成加粗，不再傻等定时器
       if (e.key === '*') {
-        try { if (_astTimer) { clearTimeout(_astTimer as any); _astTimer = null } } catch {}
-        _astCount = (_astCount || 0) + 1
-        const ta = editor as HTMLTextAreaElement
-        const val = String(ta.value || '')
-        const s0 = ta.selectionStart >>> 0
-        const e0 = ta.selectionEnd >>> 0
-        // 特判：处于 *|* 中间时，再按 * 扩展为 **|**（不跳过右侧）
-        if (s0 === e0 && s0 > 0 && val[s0 - 1] === '*' && val[s0] === '*') {
-          e.preventDefault()
-          const left = s0 - 1, right = s0 + 1
-          ta.selectionStart = left; ta.selectionEnd = right
-          if (!insertUndoable(ta, '****')) {
-            ta.value = val.slice(0, left) + '****' + val.slice(right)
-          }
-          ta.selectionStart = ta.selectionEnd = left + 2
-          dirty = true; try { refreshTitle(); refreshStatus() } catch {}
-          if (mode === 'preview') { try { void renderPreview() } catch {} } else if (wysiwyg) { try { scheduleWysiwygRender() } catch {} }
-          _astCount = 0; _astTimer = null
-          return
-        }
-        if (_astCount === 1) { _astSelS = s0; _astSelE = e0 }
         e.preventDefault()
-        const commitStar = () => {
-          const s = _astSelS >>> 0
-          const epos = _astSelE >>> 0
-          const before = val.slice(0, s)
-          const mid = val.slice(s, epos)
-          const after = val.slice(epos)
-          const ta2 = editor as HTMLTextAreaElement
-          ta2.selectionStart = s; ta2.selectionEnd = epos
-          if (_astCount >= 2) {
-            // 加粗：**选区** 或 **|**
-            const ins = '**' + (epos > s ? mid : '') + '**'
-            if (!insertUndoable(ta2, ins)) { ta2.value = before + ins + after }
-            if (epos > s) { ta2.selectionStart = s + 2; ta2.selectionEnd = s + 2 + mid.length } else { ta2.selectionStart = ta2.selectionEnd = s + 2 }
-          } else {
-            // 斜体：*选区* 或 *|*
-            const ins = '*' + (epos > s ? mid : '') + '*'
-            if (!insertUndoable(ta2, ins)) { ta2.value = before + ins + after }
-            if (epos > s) { ta2.selectionStart = s + 1; ta2.selectionEnd = s + 1 + mid.length } else { ta2.selectionStart = ta2.selectionEnd = s + 1 }
-          }
-          dirty = true; try { refreshTitle(); refreshStatus() } catch {}
-          if (mode === 'preview') { try { void renderPreview() } catch {} } else if (wysiwyg) { try { scheduleWysiwygRender() } catch {} }
-          _astCount = 0; _astTimer = null
-        }
-        _astTimer = (setTimeout as any)(commitStar, 280)
+        handleImmediateStarCompletion(editor as HTMLTextAreaElement)
         return
       }
       // 波浪线：一次按键即完成成对环抱补全（~~ 语法）

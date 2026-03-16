@@ -1846,12 +1846,12 @@ fn main() {
         {
           install_windows_maximized_resizable_workaround(&win);
 
-          // Windows：仅负责延迟显示和聚焦，窗口装饰交由 Tauri 管理
+          // Windows：默认等前端首屏就绪后自行 show。
+          // 这里只保留一个兜底，防止前端异常时窗口永远不可见。
           let win_clone = win.clone();
           std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(120));
+            std::thread::sleep(std::time::Duration::from_millis(2500));
             let _ = win_clone.show();
-            let _ = win_clone.set_focus();
           });
         }
         #[cfg(not(target_os = "windows"))]

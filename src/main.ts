@@ -53,7 +53,6 @@ import { saveImageToLocalAndGetPathCore, toggleUploaderEnabledFromMenuCore } fro
 import { getLibraries, getActiveLibraryId, getActiveLibraryRoot, setActiveLibraryId as setActiveLibId, upsertLibrary, removeLibrary as removeLib, renameLibrary as renameLib, getLibSwitcherPosition } from './utils/library'
 import { initRibbonLibraryList, type RibbonLibraryListApi } from './ui/ribbonLibraryList'
 import { bindSharedStore } from './utils/sharedStore'
-import appIconUrl from '../Flymdnew.png?url'
 import { decorateCodeBlocks } from './decorate'
 import { ribbonIcons } from './icons'
 import { APP_VERSION } from './core/appInfo'
@@ -160,7 +159,6 @@ import {
 } from './ui/commandPalette'
 import { openLinkDialog, openRenameDialog } from './ui/linkDialogs'
 import { initExtensionsPanel, refreshExtensionsUI as panelRefreshExtensionsUI, showExtensionsOverlay as panelShowExtensionsOverlay, prewarmExtensionsPanel as panelPrewarmExtensionsPanel } from './extensions/extensionsPanel'
-import { initAboutOverlay, showAbout } from './ui/aboutOverlay'
 import { ensureUpdateOverlay, showUpdateOverlayLinux, showUpdateDownloadedOverlay, showInstallFailedOverlay, loadUpdateExtra, renderUpdateDetailsHTML } from './ui/updateOverlay'
 import { openInBrowser, upMsg } from './core/updateUtils'
 import { initLibraryContextMenu } from './ui/libraryContextMenu'
@@ -3083,22 +3081,6 @@ wysiwygCaretEl.id = 'wysiwyg-caret'
       showLibrary(libraryVisible, false)
     }
   })()
-        // 重新创建关于对话框并挂载
-        const about = document.createElement('div')
-        about.id = 'about-overlay'
-        about.className = 'about-overlay hidden'
-        about.innerHTML = `
-          <div class="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
-            <div class="about-header">
-              <div id="about-title">${t('about.title')}  v${APP_VERSION}</div>
-              <button id="about-close" class="about-close" title="${t('about.close')}">×</button>
-            </div>
-            <div class="about-body">
-              <p>${t('about.tagline')}</p>
-            </div>
-          </div>
-        `
-  try { initAboutOverlay() } catch {}
 
     // 插入链接对话框：初始化并挂载到容器
     const link = document.createElement('div')
@@ -4083,6 +4065,64 @@ function isTauriRuntime(): boolean {
     // @ts-ignore
     return typeof window !== 'undefined' && (!!(window as any).__TAURI_INTERNALS__ || !!(window as any).__TAURI__)
   } catch { return false }
+}
+
+type AboutOverlayModule = typeof import('./ui/aboutOverlay')
+
+let _aboutOverlayModulePromise: Promise<AboutOverlayModule> | null = null
+let _aboutOverlayBound = false
+let _startupWindowShown = false
+
+function loadAboutOverlayModule(): Promise<AboutOverlayModule> {
+  if (!_aboutOverlayModulePromise) {
+    _aboutOverlayModulePromise = import('./ui/aboutOverlay')
+  }
+  return _aboutOverlayModulePromise
+}
+
+async function setAboutOverlayVisible(show: boolean): Promise<void> {
+  try {
+    const mod = await loadAboutOverlayModule()
+    mod.initAboutOverlay()
+
+    if (!_aboutOverlayBound) {
+      const overlay = document.getElementById('about-overlay') as HTMLDivElement | null
+      const closeBtn = document.getElementById('about-close') as HTMLButtonElement | null
+      if (overlay) {
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            void setAboutOverlayVisible(false)
+          }
+        })
+      }
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          void setAboutOverlayVisible(false)
+        })
+      }
+      _aboutOverlayBound = true
+    }
+
+    mod.showAbout(show)
+  } catch (e) {
+    console.warn('[About] 打开关于面板失败:', e)
+  }
+}
+
+async function revealMainWindowOnce(): Promise<void> {
+  if (_startupWindowShown) return
+  _startupWindowShown = true
+  if (!isTauriRuntime()) return
+  try {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => resolve())
+      })
+    })
+    const win = getCurrentWindow()
+    await win.show()
+    await win.setFocus()
+  } catch {}
 }
 
 function setUpdateBadge(on: boolean, tip?: string) {
@@ -7456,7 +7496,7 @@ async function newFolderSafe(dir: string, name = '新建文件夹'): Promise<str
       const row = document.createElement('div')
       const ext = (e.name.split('.').pop() || '').toLowerCase()
       row.className = 'lib-node lib-file file-ext-' + ext
-      row.innerHTML = `<img class="lib-ico lib-ico-app" src="${appIconUrl}" alt=""/><span class="lib-name">${e.name}</span>`
+      row.innerHTML = `<svg class="lib-ico lib-ico-app" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h4"/></svg><span class="lib-name">${e.name}</span>`
        row.setAttribute('draggable','true')
        row.addEventListener('dragstart', (ev) => { try { ev.dataTransfer?.setData('text/plain', e.path) } catch {} })
       row.title = e.path
@@ -9551,7 +9591,7 @@ function bindEvents() {
       if (lib && !lib.contains(t)) showLibrary(false, false)
     } catch {}
   }, { capture: true })
-  if (btnAbout) btnAbout.addEventListener('click', guard(() => showAbout(true)))
+  if (btnAbout) btnAbout.addEventListener('click', guard(async () => { await setAboutOverlayVisible(true) }))
   if (btnUploader) btnUploader.addEventListener('click', guard(() => openUploaderDialog()))
 
   // 所见模式：输入/合成结束/滚动时联动渲染与同步
@@ -10163,16 +10203,6 @@ function bindEvents() {
     if (chooseBtn) chooseBtn.addEventListener('click', guard(async () => { await showLibraryMenu() }))
   if (refreshBtn) refreshBtn.addEventListener('click', guard(async () => { try { const s = await getLibrarySort(); fileTree.setSort(s) } catch {} const treeEl = document.getElementById('lib-tree') as HTMLDivElement | null; if (treeEl && !fileTreeReady) { await fileTree.init(treeEl, { getRoot: getLibraryRoot, onOpenFile: async (p: string) => { await openFile2(p) }, onOpenNewFile: async (p: string) => { await openFile2(p); mode='edit'; preview.classList.add('hidden'); try { (editor as HTMLTextAreaElement).focus() } catch {} }, onMoved: async (src: string, dst: string) => { try { if (currentFilePath === src) { currentFilePath = dst as any; refreshTitle() } } catch {} } }); fileTreeReady = true } else if (treeEl) { await fileTree.refresh() } }))
   } catch {}
-  // 关于弹窗：点击遮罩或“关闭”按钮关闭
-  const overlay = document.getElementById('about-overlay') as HTMLDivElement | null
-  if (overlay) {
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) showAbout(false)
-    })
-    const closeBtn = document.getElementById('about-close') as HTMLButtonElement | null
-    if (closeBtn) closeBtn.addEventListener('click', () => showAbout(false))
-  }
-
   // 监听 Tauri 文件拖放（用于直接打开 .md/.markdown/.txt 文件）
   ;(async () => {
     try {
@@ -10349,27 +10379,18 @@ function bindEvents() {
         openPluginSettings,
       })
     } catch {}
-    try {
-      await syncOutlineDockFromStore()
-    } catch {}
-    try {
-      const layout = await getOutlineLayout()
-      await setOutlineLayout(layout, false)
-    } catch {}
-    // 读取紧凑标题栏设置并应用
-    try {
-      const compact = await getCompactTitlebar(store)
-      await setCompactTitlebar(compact, store, false)
-    } catch {}
     await maybeAutoImportPortableBackup()
-    try {
-      const side = await getLibrarySide()
-      await setLibrarySide(side, false)
-    } catch {}
-    try {
-      const docked = await getLibraryDocked()
-      await setLibraryDocked(docked, false)
-    } catch {}
+    const [layout, compact, side, docked] = await Promise.all([
+      getOutlineLayout().catch(() => outlineLayout),
+      getCompactTitlebar(store).catch(() => isCompactTitlebarEnabled()),
+      getLibrarySide().catch(() => librarySide),
+      getLibraryDocked().catch(() => libraryDocked),
+    ])
+    try { await syncOutlineDockFromStore() } catch {}
+    try { await setOutlineLayout(layout, false) } catch {}
+    try { await setCompactTitlebar(compact, store, false) } catch {}
+    try { await setLibrarySide(side, false) } catch {}
+    try { await setLibraryDocked(docked, false) } catch {}
     // 开发模式：不再自动打开 DevTools，改为快捷键触发，避免干扰首屏
     // 快捷键见下方全局 keydown（F12 或 Ctrl+Shift+I）
     // 核心功能：必须执行
@@ -10381,6 +10402,7 @@ function bindEvents() {
     // 依据当前语言，应用一次 UI 文案（含英文简写，避免侧栏溢出）
     try { applyI18nUi() } catch {}
     try { logInfo('打点:事件绑定完成') } catch {}
+    await revealMainWindowOnce()
 
     // 性能标记：首次渲染完成
     performance.mark('flymd-first-render')

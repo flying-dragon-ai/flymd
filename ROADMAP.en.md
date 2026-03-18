@@ -2,6 +2,13 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.3.5
+- Improved: Startup has been slimmed down again. The main window now appears after the first frame is ready, while non-critical modules such as tabs, split view, line numbers, library resize, and the theme panel are deferred for a faster, steadier launch
+- Fixed: In Source mode, `*` and backtick completion is now handled immediately, removing input lag; single/double/triple backtick wrapping and fenced-code generation respond more directly
+- Improved: Tab indentation now uses a unified four-space-style indent with compatibility for older `&emsp;` / full-width-space indentation, so WYSIWYG no longer shows transcoded indent artifacts
+- Improved: Source mode line numbers are toned down visually, while the active line indicator is clearer
+- Updated: The extension ecosystem adds the third-party “Translate Selection” plugin; “Blinko Integration” is upgraded to v1.2.0 with article sending, note pulling, local-folder sync, and generated login portal documents
+
 ## Update v1.3.4
 - Added: Source mode now shows a left-side line-number gutter that stays in sync with scrolling and highlights the current line
 - Improved: Windows installers now use a dedicated icon for associated documents instead of reusing the app icon

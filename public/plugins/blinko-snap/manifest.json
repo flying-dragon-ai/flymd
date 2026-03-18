@@ -1,13 +1,13 @@
 {
   "id": "blinko-snap",
-  "name": "发送到 Blinko",
-  "version": "1.0.0",
+  "name": "Blinko 集成",
+  "version": "1.2.0",
   "author": "flyMD",
-  "description": "右键菜单一键将当前内容发送到 Blinko",
+  "description": "深度集成 Blinko：发送文章、从列表选择拉取、同步本地目录，并生成可登录的 Blinko 门户文档",
   "i18n": {
     "en": {
-      "name": "Send to Blinko",
-      "description": "Send the current content to Blinko from the context menu with one click."
+      "name": "Blinko Integration",
+      "description": "Deep Blinko integration for sending articles, selecting notes to pull, syncing them locally, and generating a login portal document."
     }
   },
   "main": "main.js"

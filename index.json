@@ -80,7 +80,7 @@
     },
     {
       "homepage": "https://github.com/flyhunterl/flymd",
-      "name": "发送到 Blinko",
+      "name": "Blinko",
       "description": "右键菜单一键将当前内容发送到 Blinko",
       "author": "flyMD",
       "id": "blinko-snap",
